@@ -1,8 +1,18 @@
 <Project>
   <PropertyGroup>
+    <_DavidsCommonPropsPath>$(MSBuildThisFileDirectory)../Davids.Shared/eng/Davids.Common.props</_DavidsCommonPropsPath>
+    <_DavidsServiceDefaultsProject>$(MSBuildThisFileDirectory)../Davids.Shared/src/Davids.ServiceDefaults/Davids.ServiceDefaults.csproj</_DavidsServiceDefaultsProject>
+    <UseSharedPackageReference Condition="'$(UseSharedPackageReference)' == '' and !Exists('$(_DavidsServiceDefaultsProject)')">true</UseSharedPackageReference>
+  </PropertyGroup>
+
+  <Import Project="$(_DavidsCommonPropsPath)" Condition="Exists('$(_DavidsCommonPropsPath)')" />
+
+  <!-- Standalone single-repository fallback when ../Davids.Shared is not checked out alongside this repository -->
+  <PropertyGroup Condition="!Exists('$(_DavidsCommonPropsPath)')">
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>disable</Nullable>
+    <Nullable>enable</Nullable>
+    <UseArtifactsOutput>true</UseArtifactsOutput>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <WarningsAsErrors>$(WarningsAsErrors);NU1900;NU1901;NU1902;NU1903;NU1904</WarningsAsErrors>
     <NuGetAudit>true</NuGetAudit>
@@ -11,6 +21,8 @@
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <AnalysisLevel>latest</AnalysisLevel>
     <AnalysisModeSecurity>All</AnalysisModeSecurity>
+    <DavidsServiceDefaultsVersion Condition="'$(DavidsServiceDefaultsVersion)' == ''">1.0.0</DavidsServiceDefaultsVersion>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <NuGetLockFilePath Condition="'$(UseSharedPackageReference)' == 'true' and '$(NuGetLockFilePath)' == ''">$(MSBuildThisFileDirectory)artifacts/obj/$(MSBuildProjectName)/packages.pkgref.lock.json</NuGetLockFilePath>
   </PropertyGroup>
 </Project>

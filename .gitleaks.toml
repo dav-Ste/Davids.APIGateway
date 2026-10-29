@@ -32,7 +32,7 @@ keywords = ["password=", "pwd="]
 [[allowlists]]
 description = "Ignore VCS internals, IDE caches, transient build outputs, and NuGet lockfiles"
 paths = [
-  '''(?:^|[\\/])(?:\.git|\.vs|bin|obj|TestResults|logs)[\\/]''',
+  '''(?:^|[\\/])(?:\.git|\.vs|artifacts|bin|obj|TestResults|logs)[\\/]''',
   '''packages\.lock\.json$''',
   '''\.sha256$'''
 ]

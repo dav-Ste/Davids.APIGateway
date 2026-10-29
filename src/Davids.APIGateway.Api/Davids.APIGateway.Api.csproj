@@ -4,6 +4,9 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Davids.APIGateway.Infrastructure/Davids.APIGateway.Infrastructure.csproj" />
-    <ProjectReference Include="../../../Davids.Shared/src/Davids.ServiceDefaults/Davids.ServiceDefaults.csproj" />
+  </ItemGroup>
+  <ItemGroup Label="Shared ServiceDefaults (ProjectReference by default; PackageReference when UseSharedPackageReference=true)">
+    <ProjectReference Include="../../../Davids.Shared/src/Davids.ServiceDefaults/Davids.ServiceDefaults.csproj" Condition="'$(UseSharedPackageReference)' != 'true'" />
+    <PackageReference Include="Davids.ServiceDefaults" Condition="'$(UseSharedPackageReference)' == 'true'" />
   </ItemGroup>
 </Project>

@@ -61,9 +61,9 @@ public static class VaultConfiguration
         configuration.AddInMemoryCollection(values);
     }
 
-    public static Dictionary<string, string> Flatten(JsonElement root)
+    public static Dictionary<string, string?> Flatten(JsonElement root)
     {
-        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var values = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         void Visit(JsonElement element, string prefix)
         {
             if (element.ValueKind == JsonValueKind.Object)

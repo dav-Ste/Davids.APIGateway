@@ -36,7 +36,7 @@ jobs:
         run: |
           python3 -m pip install --quiet semgrep==1.182.0
           semgrep scan --validate --config .semgrep/davids-security.yml --metrics=off
-          semgrep scan --no-git-ignore --exclude=bin --exclude=obj --exclude=.git --exclude=.vs --exclude=TestResults --config .semgrep/davids-security.yml . --error --metrics=off --sarif -o semgrep.sarif
+          semgrep scan --no-git-ignore --exclude=artifacts --exclude=bin --exclude=obj --exclude=.git --exclude=.vs --exclude=TestResults --config .semgrep/davids-security.yml . --error --metrics=off --sarif -o semgrep.sarif
 
       - name: Upload Semgrep SARIF
         if: always()
@@ -52,6 +52,7 @@ jobs:
           framework: dockerfile,github_actions
           quiet: true
           compact: true
+          skip_path: artifacts,bin,obj,TestResults
 
   dotnet-sca-grype-and-trivy:
     name: .NET 10 Build, NuGet JSON Audit & SHA-Pinned Grype/Trivy
@@ -80,13 +81,13 @@ jobs:
         shell: pwsh
         working-directory: ./Davids.APIGateway
         run: |
-          dotnet restore Davids.APIGateway.sln --locked-mode -m:1 -nr:false --tl:off
+          dotnet restore Davids.APIGateway.slnx --locked-mode -m:1 -nr:false --tl:off
           if ($LASTEXITCODE) { throw 'Locked restore failed' }
-          dotnet build Davids.APIGateway.sln --no-restore -c Release -warnaserror -m:2 -nr:false --tl:off
+          dotnet build Davids.APIGateway.slnx --no-restore -c Release -warnaserror -m:2 -nr:false --tl:off
           if ($LASTEXITCODE) { throw 'Build failed' }
-          dotnet test Davids.APIGateway.sln --no-build -c Release -m:2 -nr:false --tl:off
+          dotnet test Davids.APIGateway.slnx --no-build -c Release -m:2 -nr:false --tl:off
           if ($LASTEXITCODE) { throw 'Tests failed' }
-          $vulnRaw = (dotnet list Davids.APIGateway.sln package --vulnerable --include-transitive --format json) -join [Environment]::NewLine
+          $vulnRaw = (dotnet list Davids.APIGateway.slnx package --vulnerable --include-transitive --format json) -join [Environment]::NewLine
           if ($LASTEXITCODE) { throw 'NuGet vulnerability audit command failed' }
           $report = $vulnRaw | ConvertFrom-Json
           foreach ($proj in @($report.projects)) {
@@ -119,11 +120,13 @@ jobs:
           severity-cutoff: high
           output-format: sarif
 
+      # Exclude centralized MSBuild artifacts/ so Trivy scans source lockfiles & IaC only
       - name: Scan lockfiles with SHA-pinned Trivy
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
           scan-ref: ./Davids.APIGateway
+          skip-dirs: "**/artifacts,**/bin,**/obj,**/TestResults"
           scanners: vuln,misconfig
           severity: CRITICAL,HIGH
           exit-code: "1"

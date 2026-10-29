@@ -26,20 +26,21 @@ namespace Davids.APIGateway.Tests;
 public sealed class GatewayAuthTests
 {
     private sealed class FakeRevocation(
-        IEnumerable<string> revokedCustomerIds = null,
-        IEnumerable<string> revokedAdminIds = null) : IGatewayTokenRevocation
+        IEnumerable<string>? revokedCustomerIds = null,
+        IEnumerable<string>? revokedAdminIds = null) : IGatewayTokenRevocation
     {
         private readonly HashSet<string> revokedCustomers = new(revokedCustomerIds ?? [], StringComparer.Ordinal);
         private readonly HashSet<string> revokedAdmins = new(revokedAdminIds ?? [], StringComparer.Ordinal);
 
-        public Task<bool> IsRevokedAsync(string tokenId, CancellationToken cancellationToken = default)
+        public Task<bool> IsRevokedAsync(string? tokenId, CancellationToken cancellationToken = default)
             => Task.FromResult(string.IsNullOrWhiteSpace(tokenId) || revokedCustomers.Contains(tokenId));
 
-        public Task<bool> IsAdminRevokedAsync(string tokenId, CancellationToken cancellationToken = default)
+        public Task<bool> IsAdminRevokedAsync(string? tokenId, CancellationToken cancellationToken = default)
             => Task.FromResult(string.IsNullOrWhiteSpace(tokenId) || revokedAdmins.Contains(tokenId));
     }
 
     [Theory]
+    [Trait("Category", "Integration")]
     [InlineData("POST", "/identity/sign-up", "/sign-up")]
     [InlineData("GET", "/identity/.well-known/openid-configuration", "/.well-known/openid-configuration")]
     [InlineData("GET", "/identity/.well-known/jwks", "/.well-known/jwks")]
@@ -103,6 +104,7 @@ public sealed class GatewayAuthTests
     }
 
     [Fact]
+    [Trait("Category", "Integration")]
     public async Task AdminIdentityHasNoPublicSignUpRouteAndUserInfoRequiresVerifiedToken()
     {
         var downstreamHits = 0;
@@ -142,6 +144,7 @@ public sealed class GatewayAuthTests
     }
 
     [Fact]
+    [Trait("Category", "Integration")]
     public async Task PublicHealthAndGatewayInfoEndpointsAllowAnonymousRequests()
     {
         using var factory = GatewayTestSecurity.CreateGatewayFactory("http://127.0.0.1:9/");
@@ -157,6 +160,7 @@ public sealed class GatewayAuthTests
     }
 
     [Fact]
+    [Trait("Category", "Integration")]
     public async Task MissingMalformedSymmetricWrongRsaKeyCrossSchemeExpiredAndIncompleteTokensAreRejectedAtGateway()
     {
         var downstreamHits = 0;
@@ -238,6 +242,7 @@ public sealed class GatewayAuthTests
     }
 
     [Fact]
+    [Trait("Category", "Integration")]
     public async Task ResourceOwnerOrAdminPolicyBlocksCrossUserAccessAndAllowsOwnerOrAdmin()
     {
         var downstreamHits = 0;
@@ -317,6 +322,7 @@ public sealed class GatewayAuthTests
     }
 
     [Fact]
+    [Trait("Category", "Integration")]
     public async Task AdminOnlyRoutesRejectNonAdminUsersIncludingTrailingSlash()
     {
         var downstreamHits = 0;
@@ -406,23 +412,24 @@ public sealed class GatewayAuthTests
     }
 
     [Fact]
+    [Trait("Category", "Integration")]
     public async Task AdminOidcBffPerformsPkceCodeExchangeIssuesEncryptedCookieEnforcesCsrfAndRevokesOnLogout()
     {
-        string forwardedAuthHeader = null;
-        string forwardedCookieHeader = null;
-        string forwardedSchemeHeader = null;
-        string capturedCodeChallenge = null;
-        string capturedNonce = null;
+        string? forwardedAuthHeader = null;
+        string? forwardedCookieHeader = null;
+        string? forwardedSchemeHeader = null;
+        string? capturedCodeChallenge = null;
+        string? capturedNonce = null;
         var revokedTokens = new List<(string Token, string Hint)>();
 
         var adminId = Guid.NewGuid();
-        string issuedAccessJwt = null;
+        string issuedAccessJwt = string.Empty;
 
         var oidcBuilder = WebApplication.CreateBuilder();
         oidcBuilder.WebHost.UseUrls("http://127.0.0.1:0");
         await using var oidcServer = oidcBuilder.Build();
 
-        string oidcBaseUrl = null;
+        string oidcBaseUrl = string.Empty;
         oidcServer.MapGet("/.well-known/openid-configuration", () => Results.Json(new
         {
             issuer = oidcBaseUrl,
@@ -667,6 +674,7 @@ public sealed class GatewayAuthTests
     }
 
     [Fact]
+    [Trait("Category", "Integration")]
     public async Task RevokedCustomerAndAdminAccessTokensAreRejectedAtGateway()
     {
         var downstreamHits = 0;
@@ -739,6 +747,7 @@ public sealed class GatewayAuthTests
     }
 
     [Fact]
+    [Trait("Category", "Unit")]
     public async Task GatewayOidcAndVaultValidationFailClosedWhenMisconfigured()
     {
         var missingAuthority = new GatewayOidcAuthoritySettings();
@@ -774,6 +783,7 @@ public sealed class GatewayAuthTests
     }
 
     [Fact]
+    [Trait("Category", "Integration")]
     public void GatewayDataProtectionKeyRingPersistsEncryptedKeysAndSurvivesReplicaRestart()
     {
         var sharedStore = new InMemoryGatewayDataProtectionStore();
@@ -841,10 +851,11 @@ public sealed class GatewayAuthTests
     {
         private readonly Dictionary<string, string> _entries = new(StringComparer.Ordinal);
         public IReadOnlyCollection<string> ReadAllXmlElements() => _entries.Values.ToArray();
-        public void StoreXmlElement(string friendlyName, string xml) => _entries[friendlyName ?? Guid.NewGuid().ToString("N")] = xml;
+        public void StoreXmlElement(string? friendlyName, string xml) => _entries[friendlyName ?? Guid.NewGuid().ToString("N")] = xml;
     }
 
     [Fact]
+    [Trait("Category", "Integration")]
     public async Task GatewayEmitsStructuredSecurityAuditLogsAndRestrictsAdminLoginAuditsRouteToAdmins()
     {
         var auditSink = new CapturingAuditLoggerProvider();
@@ -918,14 +929,14 @@ public sealed class GatewayAuthTests
             string category,
             System.Collections.Concurrent.ConcurrentQueue<string> sink) : Microsoft.Extensions.Logging.ILogger
         {
-            public IDisposable BeginScope<TState>(TState state) where TState : notnull => NullScope.Instance;
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => NullScope.Instance;
             public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
             public void Log<TState>(
                 Microsoft.Extensions.Logging.LogLevel logLevel,
                 Microsoft.Extensions.Logging.EventId eventId,
                 TState state,
-                Exception exception,
-                Func<TState, Exception, string> formatter)
+                Exception? exception,
+                Func<TState, Exception?, string> formatter)
             {
                 if (string.Equals(category, "Davids.Security.Audit", StringComparison.Ordinal))
                 {

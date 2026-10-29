@@ -51,12 +51,12 @@ jobs:
           config-file: ./Davids.APIGateway/.github/codeql/codeql-config.yml
           source-root: ./Davids.APIGateway
 
-      - name: Build Davids.APIGateway.sln for CodeQL extraction
+      - name: Build Davids.APIGateway.slnx for CodeQL extraction
         if: matrix.language == 'csharp'
         working-directory: ./Davids.APIGateway
         run: |
-          dotnet restore Davids.APIGateway.sln --locked-mode -m:1 -nr:false --tl:off
-          dotnet build Davids.APIGateway.sln --no-restore -c Release -warnaserror -m:2 -nr:false --tl:off
+          dotnet restore Davids.APIGateway.slnx --locked-mode -m:1 -nr:false --tl:off
+          dotnet build Davids.APIGateway.slnx --no-restore -c Release -warnaserror -m:2 -nr:false --tl:off
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1

@@ -12,9 +12,9 @@ It enforces dual-authority **RS256** OIDC JWT validation via public JWKS discove
 - `Davids.ServiceDefaults`: shared logging, health, OpenTelemetry, and service-discovery defaults from the sibling `Davids.Shared` repository.
 
 ```powershell
-dotnet restore Davids.APIGateway.sln --locked-mode
-dotnet build Davids.APIGateway.sln --no-restore -c Release
-dotnet test Davids.APIGateway.sln --no-restore -c Release
+dotnet restore Davids.APIGateway.slnx --locked-mode
+dotnet build Davids.APIGateway.slnx --no-restore -c Release
+dotnet test Davids.APIGateway.slnx --no-restore -c Release
 ```
 
 ## Self-Hosted OIDC Authentication & Admin BFF Architecture

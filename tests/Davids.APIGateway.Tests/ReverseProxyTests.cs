@@ -13,6 +13,7 @@ using Xunit;
 
 namespace Davids.APIGateway.Tests;
 
+[Trait("Category", "Integration")]
 public sealed class ReverseProxyTests
 {
     [Theory]

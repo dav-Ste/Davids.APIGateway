@@ -32,12 +32,12 @@ internal static class GatewayTestSecurity
     public static WebApplicationFactory<Program> CreateGatewayFactory(
         string backendDestination,
         string frontendDestination = "http://127.0.0.1:9/",
-        IGatewayTokenRevocation revocation = null,
-        string identityDestination = null,
-        string adminIdentityDestination = null,
-        string customersDestination = null,
-        string adminAuthority = null,
-        Action<IServiceCollection> configureServices = null)
+        IGatewayTokenRevocation? revocation = null,
+        string? identityDestination = null,
+        string? adminIdentityDestination = null,
+        string? customersDestination = null,
+        string? adminAuthority = null,
+        Action<IServiceCollection>? configureServices = null)
     {
         return new WebApplicationFactory<Program>().WithWebHostBuilder(webHost =>
         {
@@ -89,7 +89,7 @@ internal static class GatewayTestSecurity
         });
     }
 
-    public static string CreateTokenForRole(Guid subject, string role = "user", string tokenId = null)
+    public static string CreateTokenForRole(Guid subject, string role = "user", string? tokenId = null)
         => string.Equals(role, "admin", StringComparison.Ordinal)
             ? CreateAdminToken(subject, role, tokenId)
             : CreateCustomerToken(subject, role, tokenId);
@@ -97,8 +97,8 @@ internal static class GatewayTestSecurity
     public static string CreateCustomerToken(
         Guid subject,
         string role = "user",
-        string tokenId = null,
-        RsaSecurityKey signingKey = null,
+        string? tokenId = null,
+        RsaSecurityKey? signingKey = null,
         string issuer = CustomerIssuer,
         string audience = CustomerAudience,
         DateTime? notBeforeUtc = null,
@@ -122,8 +122,8 @@ internal static class GatewayTestSecurity
     public static string CreateAdminToken(
         Guid subject,
         string role = "admin",
-        string tokenId = null,
-        RsaSecurityKey signingKey = null,
+        string? tokenId = null,
+        RsaSecurityKey? signingKey = null,
         string issuer = AdminIssuer,
         string audience = AdminAudience,
         DateTime? notBeforeUtc = null,
@@ -146,7 +146,7 @@ internal static class GatewayTestSecurity
 
     public static string CreateAdminIdToken(
         Guid subject,
-        string nonce,
+        string? nonce,
         string issuer,
         string clientId = BffClientId,
         string email = "admin@davids.local",
@@ -179,8 +179,8 @@ internal static class GatewayTestSecurity
 
     private static string WriteToken(
         Guid subject,
-        string role,
-        string tokenId,
+        string? role,
+        string? tokenId,
         RsaSecurityKey signingKey,
         string issuer,
         string audience,

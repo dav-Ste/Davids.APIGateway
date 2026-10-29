@@ -14,19 +14,19 @@ public static class GatewaySecurityMetrics
     private static readonly Counter<long> BffCsrfRejectedCounter =
         AuditMeter.CreateCounter<long>("davids.security.bff_csrf_rejected", unit: "{request}");
 
-    public static void RecordRateLimitRejection(string policy)
+    public static void RecordRateLimitRejection(string? policy)
     {
         RateLimitRejectedCounter.Add(
             1,
-            new KeyValuePair<string, object>("service", "davids-api-gateway"),
-            new KeyValuePair<string, object>("policy", policy ?? "default"));
+            new KeyValuePair<string, object?>("service", "davids-api-gateway"),
+            new KeyValuePair<string, object?>("policy", policy ?? "default"));
     }
 
-    public static void RecordBffCsrfRejection(string endpoint)
+    public static void RecordBffCsrfRejection(string? endpoint)
     {
         BffCsrfRejectedCounter.Add(
             1,
-            new KeyValuePair<string, object>("service", "davids-api-gateway"),
-            new KeyValuePair<string, object>("endpoint", endpoint ?? "unknown"));
+            new KeyValuePair<string, object?>("service", "davids-api-gateway"),
+            new KeyValuePair<string, object?>("endpoint", endpoint ?? "unknown"));
     }
 }

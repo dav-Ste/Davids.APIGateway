@@ -8,7 +8,7 @@ namespace Davids.APIGateway.Infrastructure.Auth;
 public interface IGatewayDataProtectionStore
 {
     IReadOnlyCollection<string> ReadAllXmlElements();
-    void StoreXmlElement(string friendlyName, string xml);
+    void StoreXmlElement(string? friendlyName, string xml);
 }
 
 public sealed class RedisGatewayDataProtectionStore(
@@ -33,7 +33,7 @@ public sealed class RedisGatewayDataProtectionStore(
         return elements;
     }
 
-    public void StoreXmlElement(string friendlyName, string xml)
+    public void StoreXmlElement(string? friendlyName, string xml)
     {
         var fieldName = string.IsNullOrWhiteSpace(friendlyName)
             ? "key-" + Guid.NewGuid().ToString("N")
@@ -60,7 +60,7 @@ public sealed class GatewayDataProtectionXmlRepository(IGatewayDataProtectionSto
         return parsed.AsReadOnly();
     }
 
-    public void StoreElement(XElement element, string friendlyName)
+    public void StoreElement(XElement element, string? friendlyName)
     {
         ArgumentNullException.ThrowIfNull(element);
         store.StoreXmlElement(friendlyName, element.ToString(SaveOptions.DisableFormatting));

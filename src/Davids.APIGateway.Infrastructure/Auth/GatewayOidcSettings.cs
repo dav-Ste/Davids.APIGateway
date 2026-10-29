@@ -6,18 +6,18 @@ namespace Davids.APIGateway.Infrastructure.Auth;
 
 public class GatewayOidcAuthoritySettings
 {
-    public string Authority { get; set; }
-    public string Issuer { get; set; }
+    public string? Authority { get; set; }
+    public string? Issuer { get; set; }
     public string Audience { get; set; } = "davids-services";
-    public string PublicKeyPem { get; set; }
+    public string? PublicKeyPem { get; set; }
     public int ClockSkewSeconds { get; set; } = 30;
 
-    public string MetadataAddress
+    public string? MetadataAddress
         => string.IsNullOrWhiteSpace(Authority)
             ? null
             : Authority.TrimEnd('/') + "/.well-known/openid-configuration";
 
-    public string EffectiveIssuer
+    public string? EffectiveIssuer
     {
         get
         {
@@ -26,7 +26,7 @@ public class GatewayOidcAuthoritySettings
         }
     }
 
-    public RsaSecurityKey ValidateAndResolveStaticPublicKey(string sectionName)
+    public RsaSecurityKey? ValidateAndResolveStaticPublicKey(string sectionName)
     {
         if (string.IsNullOrWhiteSpace(Audience) || ClockSkewSeconds < 0 || ClockSkewSeconds > 300)
         {
@@ -53,7 +53,7 @@ public class GatewayOidcAuthoritySettings
             return null;
         }
 
-        var trimmed = PublicKeyPem.Trim();
+        var trimmed = PublicKeyPem!.Trim();
         if (trimmed.Contains("PRIVATE KEY", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException(
@@ -89,11 +89,11 @@ public sealed class GatewayAdminOidcSettings : GatewayOidcAuthoritySettings
     }
 
     public string BffClientId { get; set; } = "davids-admin-bff";
-    public string BffClientSecret { get; set; }
+    public string BffClientSecret { get; set; } = string.Empty;
     public string PublicAuthorizeEndpoint { get; set; } = "/admin-identity/connect/authorize";
     public int SessionHours { get; set; } = 8;
 
-    public RsaSecurityKey ValidateAdminSettings(string customerPublicKeyPem)
+    public RsaSecurityKey? ValidateAdminSettings(string? customerPublicKeyPem)
     {
         var key = ValidateAndResolveStaticPublicKey("AdminOidc");
         if (string.IsNullOrWhiteSpace(BffClientId))

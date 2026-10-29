@@ -1,0 +1,40 @@
+# .NET 10 centralized artifacts output (<UseArtifactsOutput>true</UseArtifactsOutput>)
+artifacts/
+**/artifacts/
+
+# Legacy per-project build & test directories
+**/[Bb]in/
+**/[Oo]bj/
+**/TestResults/
+**/[Ll]ogs/
+
+# VCS, IDE & package caches
+.git/
+**/.git/
+.github/
+**/.github/
+.githooks/
+**/.githooks/
+.vs/
+**/.vs/
+.idea/
+**/.idea/
+.nuget/
+packages/
+node_modules/
+*.user
+*.suo
+*.cache
+*DS_Store
+
+# Never include local certificates, private keys, or env files in Docker build context
+*.pfx
+**/*.pfx
+*.p12
+**/*.p12
+*.key
+**/*.key
+.env
+**/.env
+.env.*
+**/.env.*

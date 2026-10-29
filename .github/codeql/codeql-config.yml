@@ -4,6 +4,7 @@ queries:
   - uses: security-extended
 
 paths-ignore:
+  - "**/artifacts/**"
   - "**/bin/**"
   - "**/obj/**"
   - "**/TestResults/**"

@@ -598,7 +598,7 @@ public static class GatewaySecurityExtensions
     private readonly record struct RefreshedTokenSet(
         string AccessToken,
         string RefreshToken,
-        string IdToken,
+        string? IdToken,
         DateTimeOffset ExpiresAt);
 
     private static async Task<RefreshedTokenSet?> TryRefreshAdminTokensAsync(

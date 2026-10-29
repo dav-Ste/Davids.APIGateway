@@ -12,7 +12,7 @@ public static class GatewayBffEndpoints
 {
     public static IEndpointRouteBuilder MapGatewayBffEndpoints(this IEndpointRouteBuilder endpoints)
     {
-        endpoints.MapGet("/auth/login", (string returnUrl, HttpContext context, ILoggerFactory loggerFactory) =>
+        endpoints.MapGet("/auth/login", (string? returnUrl, HttpContext context, ILoggerFactory loggerFactory) =>
         {
             context.Response.Headers.CacheControl = "no-store";
             var safeReturnUrl = NormalizeLocalReturnUrl(returnUrl);
@@ -33,8 +33,8 @@ public static class GatewayBffEndpoints
             context.Response.Headers.CacheControl = "no-store";
 
             var cookieAuth = await context.AuthenticateAsync(GatewayAuthPolicies.AdminBffCookieScheme);
-            ClaimsPrincipal principal = null;
-            string authMethod = null;
+            ClaimsPrincipal? principal = null;
+            string? authMethod = null;
 
             if (cookieAuth.Succeeded && cookieAuth.Principal is not null &&
                 GatewayIdentityPredicates.IsVerifiedAdmin(cookieAuth.Principal))
@@ -128,7 +128,7 @@ public static class GatewayBffEndpoints
         return endpoints;
     }
 
-    public static string NormalizeLocalReturnUrl(string returnUrl)
+    public static string NormalizeLocalReturnUrl(string? returnUrl)
     {
         if (string.IsNullOrWhiteSpace(returnUrl))
         {
@@ -154,7 +154,7 @@ public static class GatewayBffEndpoints
         HttpClient client,
         string revocationEndpoint,
         GatewayAdminOidcSettings adminOidc,
-        string token,
+        string? token,
         string tokenTypeHint,
         ILogger logger,
         CancellationToken cancellationToken)
