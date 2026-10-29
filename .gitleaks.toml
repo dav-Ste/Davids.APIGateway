@@ -1,0 +1,49 @@
+title = "Davids Platform Gitleaks Configuration"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "davids-hashicorp-vault-token"
+description = "HashiCorp Vault service or batch token"
+regex = '''\b(?:hvs|hvb)\.[A-Za-z0-9_-]{24,}\b'''
+keywords = ["hvs.", "hvb."]
+
+[[rules]]
+id = "davids-oidc-or-dataprotection-secret"
+description = "Hardcoded OIDC BFF secret, RSA PEM key setting, or Data Protection MasterKey"
+regex = '''(?i)"?(?:BffClientSecret|SigningKeyPem|EncryptionKeyPem|MasterKey)"?\s*[:=]\s*"([^"<$\r\n]{16,})"'''
+secretGroup = 1
+keywords = ["bffclientsecret", "signingkeypem", "encryptionkeypem", "masterkey"]
+  [[rules.allowlists]]
+  description = "Allow synthetic in-memory unit-test configuration strings in xUnit test projects"
+  paths = ['''(?:^|[\\/])tests[\\/].*\.cs$''']
+
+[[rules]]
+id = "davids-connection-string-password"
+description = "Hardcoded SQL Server or Redis password in connection string"
+regex = '''(?i)(?:^|[;,\s"'])(?:Password|Pwd)\s*=\s*([^;"'<$\s\r\n]{8,})'''
+secretGroup = 1
+keywords = ["password=", "pwd="]
+  [[rules.allowlists]]
+  description = "Allow synthetic unit-test connection strings and placeholder documentation examples"
+  paths = ['''(?:^|[\\/])tests[\\/].*\.cs$''', '''\.md$''']
+
+[[allowlists]]
+description = "Ignore VCS internals, IDE caches, transient build outputs, and NuGet lockfiles"
+paths = [
+  '''(?:^|[\\/])(?:\.git|\.vs|bin|obj|TestResults|logs)[\\/]''',
+  '''packages\.lock\.json$''',
+  '''\.sha256$'''
+]
+
+[[allowlists]]
+description = "Allow non-secret xUnit test fixture identifiers and synthetic test keys in GatewayAuthTests"
+condition = "AND"
+paths = ['''(?:^|[\\/])tests[\\/].*Tests\.cs$''']
+regexTarget = "line"
+regexes = [
+  '''tokenId:\s*"(?:revoked|active)-[a-z]+-\d+"''',
+  '''"MasterKey"\s*:\s*"0123456789abcdef0123456789abcdef"''',
+  '''"BffClientSecret"\s*:\s*"secret-value-at-least-24-chars"'''
+]

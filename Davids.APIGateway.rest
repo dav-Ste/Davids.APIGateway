@@ -1,0 +1,107 @@
+# Replace port with api-gateway's HTTP endpoint shown in Aspire.
+@gateway = http://localhost:17320
+@identity = {{gateway}}/identity
+@adminIdentity = {{gateway}}/admin-identity
+@customers = {{gateway}}/customers
+@accessToken = paste-customer-rs256-access-token-here
+@adminAccessToken = paste-admin-rs256-access-token-here
+@customerId = paste-guid-from-token-sub-here
+
+### Gateway health and OIDC/BFF metadata
+GET {{gateway}}/health
+
+###
+GET {{gateway}}/gateway-info
+
+### Customer OIDC discovery and public RSA JWKS
+GET {{identity}}/.well-known/openid-configuration
+
+###
+GET {{identity}}/.well-known/jwks
+
+### Admin OIDC discovery and public RSA JWKS (distinct issuer & RSA signing key)
+GET {{adminIdentity}}/.well-known/openid-configuration
+
+###
+GET {{adminIdentity}}/.well-known/jwks
+
+### Public administrator SSO shell (initiates Authorization Code + PKCE via GET /auth/login)
+GET {{gateway}}/login
+
+### Check current Gateway OIDC BFF session state
+GET {{gateway}}/auth/session
+
+### Register a customer through YARP -> Customer Identity (stored in identitydb)
+POST {{identity}}/sign-up
+Content-Type: application/json
+
+{
+  "email": "gateway-user@example.com",
+  "password": "Correct-horse-123!"
+}
+
+### Exchange OAuth 2.1 Authorization Code + PKCE (S256) for Customer RS256 tokens
+### (Obtain code via GET/POST {{identity}}/connect/authorize or run ../Davids/scripts/Test-Infrastructure.ps1)
+POST {{identity}}/connect/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=authorization_code&client_id=davids-web&code=paste-auth-code&redirect_uri=http%3A%2F%2Flocalhost%2Fcallback&code_verifier=paste-pkce-verifier
+
+### Current customer through the gateway (/me and OIDC /connect/userinfo)
+GET {{identity}}/me
+Authorization: Bearer {{accessToken}}
+
+###
+GET {{identity}}/connect/userinfo
+Authorization: Bearer {{accessToken}}
+
+### Current administrator identity
+GET {{adminIdentity}}/me
+Authorization: Bearer {{adminAccessToken}}
+
+### List administrator accounts (stored exclusively in adminidentitydb)
+GET {{adminIdentity}}/users
+Authorization: Bearer {{adminAccessToken}}
+
+### Provision a new administrator account (admin-only; no public /sign-up)
+POST {{adminIdentity}}/users
+Authorization: Bearer {{adminAccessToken}}
+Content-Type: application/json
+
+{
+  "email": "ops-admin@davids.local",
+  "password": "Strong-Admin-Password-2026!",
+  "fullName": "Operations Administrator"
+}
+
+### Search and filter customers (administrator)
+GET {{customers}}?search=john&state=valid
+Authorization: Bearer {{adminAccessToken}}
+
+### Customer details (profile is provisioned asynchronously from identity signed_up event)
+GET {{customers}}/{{customerId}}
+Authorization: Bearer {{accessToken}}
+
+### Complete the current user's customer profile
+POST {{customers}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "customerId": "{{customerId}}",
+  "fullname": "John Doe",
+  "address": "New York City, Street XYZ"
+}
+
+### Edit a customer record (administrator)
+PUT {{customers}}/{{customerId}}
+Authorization: Bearer {{adminAccessToken}}
+Content-Type: application/json
+
+{
+  "customerId": "{{customerId}}",
+  "fullName": "John A. Doe",
+  "email": "gateway-user@example.com",
+  "address": "42 Broadway, New York, NY",
+  "state": "valid"
+}

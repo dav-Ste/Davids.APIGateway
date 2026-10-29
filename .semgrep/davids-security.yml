@@ -1,0 +1,148 @@
+rules:
+  - id: davids-zero-signing-key-on-resource-servers
+    message: >
+      Resource servers and edge gateways (Davids.Services.Customers and Davids.APIGateway) must validate
+      asymmetric RS256 OIDC tokens exclusively via JWKS discovery and must never reference private signing keys
+      or symmetric signing keys.
+    severity: ERROR
+    languages: [csharp]
+    paths:
+      include:
+        - "**/*Customers*/src/**/*.cs"
+        - "**/*APIGateway*/src/**/*.cs"
+        - "**/src/*Customers*/**/*.cs"
+        - "**/src/*APIGateway*/**/*.cs"
+    pattern-either:
+      - pattern: new SymmetricSecurityKey(...)
+      - pattern: "$OPTS.IssuerSigningKey = ..."
+      - pattern: '"SigningKeyPem"'
+      - pattern: '"Oidc:SigningKeyPem"'
+
+  - id: davids-admin-identity-endpoint-requires-explicit-auth
+    message: >
+      Every Minimal API endpoint in Davids.Services.AdminIdentity must declare an explicit authorization
+      contract (.RequireAuthorization("AdminOnly") or .AllowAnonymous()) so no administrator endpoint is
+      left unauthenticated by accident.
+    severity: ERROR
+    languages: [csharp]
+    paths:
+      include:
+        - "**/*AdminIdentity*/src/**/*.cs"
+        - "**/src/*AdminIdentity*/**/*.cs"
+    patterns:
+      - pattern-either:
+          - pattern: $APP.MapGet($PATH, $HANDLER)
+          - pattern: $APP.MapPost($PATH, $HANDLER)
+          - pattern: $APP.MapPut($PATH, $HANDLER)
+          - pattern: $APP.MapDelete($PATH, $HANDLER)
+          - pattern: $APP.MapPatch($PATH, $HANDLER)
+          - pattern: $APP.MapMethods($PATH, $VERBS, $HANDLER)
+      - pattern-not-inside: $EXPR.RequireAuthorization(...)
+      - pattern-not-inside: $EXPR.AllowAnonymous()
+
+  - id: davids-no-symmetric-hmac-jwt
+    message: >
+      Davids enforces asymmetric RS256 OIDC signing across Identity and AdminIdentity. Symmetric HMAC JWT
+      signing (HS256/HS384/HS512 or SymmetricSecurityKey) is prohibited.
+    severity: ERROR
+    languages: [csharp]
+    paths:
+      exclude:
+        - "**/tests/**"
+    pattern-either:
+      - pattern: new SymmetricSecurityKey(...)
+      - pattern: SecurityAlgorithms.HmacSha256
+      - pattern: SecurityAlgorithms.HmacSha384
+      - pattern: SecurityAlgorithms.HmacSha512
+      - pattern: SecurityAlgorithms.HmacSha256Signature
+
+  - id: davids-efcore-raw-sql-interpolation
+    message: >
+      Potential SQL injection: do not pass interpolated or concatenated strings to FromSqlRaw / ExecuteSqlRaw /
+      ExecuteSqlRawAsync. Use parameterized FromSql / ExecuteSql / ExecuteSqlAsync (FormattableString) instead.
+    severity: ERROR
+    languages: [csharp]
+    pattern-either:
+      - pattern: $DB.FromSqlRaw($"...", ...)
+      - pattern: $DB.FromSqlRaw($A + $B, ...)
+      - pattern: $DB.FromSqlRaw(string.Format(...), ...)
+      - pattern: $DB.ExecuteSqlRaw($"...", ...)
+      - pattern: $DB.ExecuteSqlRaw($A + $B, ...)
+      - pattern: $DB.ExecuteSqlRawAsync($"...", ...)
+      - pattern: $DB.ExecuteSqlRawAsync($A + $B, ...)
+
+  - id: davids-tls-certificate-validation-bypass
+    message: >
+      Disabling TLS server certificate validation enables man-in-the-middle attacks on OIDC JWKS discovery,
+      Vault secret loading, and YARP reverse-proxy hops.
+    severity: ERROR
+    languages: [csharp]
+    paths:
+      exclude:
+        - "**/tests/**"
+    pattern-either:
+      - pattern: $HANDLER.ServerCertificateCustomValidationCallback = ...
+      - pattern: HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+
+  - id: davids-permissive-cors-allow-any-origin
+    message: >
+      AllowAnyOrigin() is prohibited on Davids services and API Gateway. Restrict origins explicitly via configuration.
+    severity: ERROR
+    languages: [csharp]
+    paths:
+      exclude:
+        - "**/tests/**"
+    pattern: $POLICY.AllowAnyOrigin()
+
+  - id: davids-insecure-non-crypto-random
+    message: >
+      System.Random is not cryptographically secure. Use System.Security.Cryptography.RandomNumberGenerator instead.
+    severity: ERROR
+    languages: [csharp]
+    paths:
+      exclude:
+        - "**/tests/**"
+    pattern-either:
+      - pattern: new Random(...)
+      - pattern: Random.Shared.$METHOD(...)
+
+  - id: davids-legacy-x509certificate2-constructor
+    message: >
+      X509Certificate2 constructors are obsolete in .NET 10 (SYSLIB0057). Use X509CertificateLoader instead.
+    severity: ERROR
+    languages: [csharp]
+    pattern: new X509Certificate2(...)
+
+  - id: davids-admin-frontend-no-browser-token-storage-or-dom-xss
+    message: >
+      Davids.Frontend.Admin uses an encrypted HttpOnly Gateway OIDC BFF cookie (davids_admin_bff). Browser
+      storage (localStorage/sessionStorage/document.cookie) and unsafe DOM HTML sinks (innerHTML/outerHTML/eval)
+      are prohibited.
+    severity: ERROR
+    languages: [javascript, typescript]
+    pattern-either:
+      - pattern: localStorage.$PROP
+      - pattern: window.localStorage.$PROP
+      - pattern: sessionStorage.$PROP
+      - pattern: window.sessionStorage.$PROP
+      - pattern: document.cookie
+      - pattern: $EL.innerHTML = $VAL
+      - pattern: $EL.outerHTML = $VAL
+      - pattern: eval(...)
+
+  - id: davids-github-actions-must-pin-commit-sha
+    message: >
+      Third-party and GitHub Actions in workflows must be pinned to a full 40-character commit SHA
+      (e.g., uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1), never a mutable tag or branch.
+    severity: ERROR
+    languages: [yaml]
+    paths:
+      include:
+        - "**/.github/workflows/*.yml"
+        - "**/.github/workflows/*.yaml"
+    patterns:
+      - pattern: |
+          uses: $ACTION
+      - metavariable-regex:
+          metavariable: $ACTION
+          regex: ^(?!\./)[^@\s]+@(?![0-9a-f]{40}$).+$

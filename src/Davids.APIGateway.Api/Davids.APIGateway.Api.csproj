@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <UserSecretsId>davids-api-gateway-api</UserSecretsId>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Davids.APIGateway.Infrastructure/Davids.APIGateway.Infrastructure.csproj" />
+    <ProjectReference Include="../../../Davids.Shared/src/Davids.ServiceDefaults/Davids.ServiceDefaults.csproj" />
+  </ItemGroup>
+</Project>

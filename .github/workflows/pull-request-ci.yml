@@ -1,0 +1,166 @@
+name: Pull Request CI — Security Gate
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+jobs:
+  secrets-semgrep-and-iac:
+    name: Gitleaks + Custom Davids Semgrep + Checkov
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout Davids.APIGateway
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Run SHA-256 verified Gitleaks v8.30.1
+        run: |
+          set -euo pipefail
+          curl -fsSL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz -o /tmp/gitleaks.tar.gz
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  /tmp/gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          chmod +x /tmp/gitleaks
+          /tmp/gitleaks dir . --config .gitleaks.toml --verbose --redact --no-banner
+          /tmp/gitleaks git . --config .gitleaks.toml --verbose --redact --no-banner
+
+      - name: Run Semgrep custom Davids security rules
+        run: |
+          python3 -m pip install --quiet semgrep==1.182.0
+          semgrep scan --validate --config .semgrep/davids-security.yml --metrics=off
+          semgrep scan --no-git-ignore --exclude=bin --exclude=obj --exclude=.git --exclude=.vs --exclude=TestResults --config .semgrep/davids-security.yml . --error --metrics=off --sarif -o semgrep.sarif
+
+      - name: Upload Semgrep SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep-davids
+
+      - name: Run Checkov (dockerfile,github_actions)
+        uses: bridgecrewio/checkov-action@99bb2caf247dfd9f03cf984373bc6043d4e32ebf # v12.1347.0
+        with:
+          directory: .
+          framework: dockerfile,github_actions
+          quiet: true
+          compact: true
+
+  dotnet-sca-grype-and-trivy:
+    name: .NET 10 Build, NuGet JSON Audit & SHA-Pinned Grype/Trivy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout Davids.APIGateway
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: Davids.APIGateway
+
+      - name: Checkout Davids.Shared
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository_owner }}/Davids.Shared
+          path: Davids.Shared
+
+      - name: Setup .NET 10 SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Locked restore, -warnaserror build, test & JSON vulnerability audit
+        shell: pwsh
+        working-directory: ./Davids.APIGateway
+        run: |
+          dotnet restore Davids.APIGateway.sln --locked-mode -m:1 -nr:false --tl:off
+          if ($LASTEXITCODE) { throw 'Locked restore failed' }
+          dotnet build Davids.APIGateway.sln --no-restore -c Release -warnaserror -m:2 -nr:false --tl:off
+          if ($LASTEXITCODE) { throw 'Build failed' }
+          dotnet test Davids.APIGateway.sln --no-build -c Release -m:2 -nr:false --tl:off
+          if ($LASTEXITCODE) { throw 'Tests failed' }
+          $vulnRaw = (dotnet list Davids.APIGateway.sln package --vulnerable --include-transitive --format json) -join [Environment]::NewLine
+          if ($LASTEXITCODE) { throw 'NuGet vulnerability audit command failed' }
+          $report = $vulnRaw | ConvertFrom-Json
+          foreach ($proj in @($report.projects)) {
+            if ($null -eq $proj.PSObject.Properties['frameworks']) { continue }
+            foreach ($fw in @($proj.frameworks)) {
+              foreach ($grp in @('topLevelPackages', 'transitivePackages')) {
+                if ($null -eq $fw.PSObject.Properties[$grp]) { continue }
+                foreach ($pkg in @($fw.$grp)) {
+                  if ($null -ne $pkg.PSObject.Properties['vulnerabilities'] -and @($pkg.vulnerabilities).Count -gt 0) {
+                    throw "Vulnerable package detected in $($proj.path): $($pkg.id) $($pkg.resolvedVersion)"
+                  }
+                }
+              }
+            }
+          }
+
+      - name: Generate CycloneDX SBOM (Syft)
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          path: ./Davids.APIGateway
+          format: cyclonedx-json
+          output-file: sbom.cdx.json
+          upload-artifact: false
+
+      - name: Scan SBOM with SHA-pinned Grype
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+        with:
+          sbom: sbom.cdx.json
+          fail-build: true
+          severity-cutoff: high
+          output-format: sarif
+
+      - name: Scan lockfiles with SHA-pinned Trivy
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: ./Davids.APIGateway
+          scanners: vuln,misconfig
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          format: sarif
+          output: trivy-fs.sarif
+
+      - name: Upload Trivy filesystem SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          sarif_file: trivy-fs.sarif
+          category: trivy-fs
+
+      - name: Build hardened container image
+        run: |
+          docker build -f ./Davids.APIGateway/Dockerfile -t davids-ci/davids-api-gateway:pr .
+
+      - name: Scan container image with SHA-pinned Grype
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+        with:
+          image: "davids-ci/davids-api-gateway:pr"
+          fail-build: true
+          severity-cutoff: high
+
+      - name: Scan container image with SHA-pinned Trivy
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: "davids-ci/davids-api-gateway:pr"
+          scanners: vuln,misconfig
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          format: sarif
+          output: trivy-image.sarif
+
+      - name: Upload Trivy image SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          sarif_file: trivy-image.sarif
+          category: trivy-image-davids-api-gateway

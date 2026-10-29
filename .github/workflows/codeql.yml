@@ -1,0 +1,64 @@
+name: Pull Request CI — CodeQL SAST
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  schedule:
+    - cron: "35 3 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: csharp
+            build-mode: manual
+    steps:
+      - name: Checkout Davids.APIGateway
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: Davids.APIGateway
+
+      - name: Checkout Davids.Shared
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository_owner }}/Davids.Shared
+          path: Davids.Shared
+
+      - name: Setup .NET 10 SDK
+        if: matrix.language == 'csharp'
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          config-file: ./Davids.APIGateway/.github/codeql/codeql-config.yml
+          source-root: ./Davids.APIGateway
+
+      - name: Build Davids.APIGateway.sln for CodeQL extraction
+        if: matrix.language == 'csharp'
+        working-directory: ./Davids.APIGateway
+        run: |
+          dotnet restore Davids.APIGateway.sln --locked-mode -m:1 -nr:false --tl:off
+          dotnet build Davids.APIGateway.sln --no-restore -c Release -warnaserror -m:2 -nr:false --tl:off
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          category: "/language:${{ matrix.language }}"

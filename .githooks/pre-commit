@@ -1,0 +1,45 @@
+#!/usr/bin/env sh
+# Davids pre-commit secret & credential gate (POSIX sh — works on Windows Git Bash, Linux, and macOS).
+# Activate across all sibling repositories via: pwsh ./scripts/Install-GitHooks.ps1 (from Davids/)
+set -eu
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+CONFIG_FILE="$REPO_ROOT/.gitleaks.toml"
+
+# 1. Block accidental commits of raw certificate/key/secret files regardless of scanner installation.
+STAGED_FILES="$(git diff --cached --name-only --diff-filter=ACMR)"
+if [ -n "$STAGED_FILES" ]; then
+  FORBIDDEN_FILES="$(printf '%s\n' "$STAGED_FILES" | grep -E '\.(pfx|p12|key|jks|kdbx)$|(^|/)\.env(\..+)?$|(^|/)appsettings\.Local\.json$' || true)"
+  if [ -n "$FORBIDDEN_FILES" ]; then
+    echo "[Davids Security Gate] Commit blocked: private key, certificate archive, or local secret file staged:" >&2
+    printf '  - %s\n' $FORBIDDEN_FILES >&2
+    echo "Store local secrets in 'dotnet user-secrets' or HashiCorp Vault instead." >&2
+    exit 1
+  fi
+fi
+
+# 2. Locate gitleaks on PATH or standard user-local install paths (Windows / Linux / macOS).
+GITLEAKS_BIN=""
+if command -v gitleaks >/dev/null 2>&1; then
+  GITLEAKS_BIN="$(command -v gitleaks)"
+elif [ -n "${LOCALAPPDATA:-}" ] && [ -x "${LOCALAPPDATA}/Programs/gitleaks/gitleaks.exe" ]; then
+  GITLEAKS_BIN="${LOCALAPPDATA}/Programs/gitleaks/gitleaks.exe"
+elif [ -x "$HOME/.local/bin/gitleaks" ]; then
+  GITLEAKS_BIN="$HOME/.local/bin/gitleaks"
+elif [ -x "/usr/local/bin/gitleaks" ]; then
+  GITLEAKS_BIN="/usr/local/bin/gitleaks"
+fi
+
+if [ -z "$GITLEAKS_BIN" ]; then
+  echo "[Davids Security Gate] Commit blocked: 'gitleaks' is required by the pre-commit secret scanner." >&2
+  echo "Install Gitleaks once by running from the Davids repository:" >&2
+  echo "  ./scripts/Install-GitHooks.ps1 -InstallGitleaks" >&2
+  echo "Or via package manager: winget install Gitleaks.Gitleaks | brew install gitleaks" >&2
+  exit 1
+fi
+
+if [ -f "$CONFIG_FILE" ]; then
+  "$GITLEAKS_BIN" git --pre-commit --staged --verbose --redact --no-banner --config "$CONFIG_FILE" "$REPO_ROOT"
+else
+  "$GITLEAKS_BIN" git --pre-commit --staged --verbose --redact --no-banner "$REPO_ROOT"
+fi

@@ -1,0 +1,10 @@
+name: "Davids CodeQL Security-Extended Configuration"
+
+queries:
+  - uses: security-extended
+
+paths-ignore:
+  - "**/bin/**"
+  - "**/obj/**"
+  - "**/TestResults/**"
+  - "**/Migrations/**"
