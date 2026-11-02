@@ -1,5 +1,8 @@
 # Davids API Gateway
 
+[![Pull Request CI — Security Gate](https://github.com/dav-Ste/Davids.APIGateway/actions/workflows/pull-request-ci.yml/badge.svg?branch=main)](https://github.com/dav-Ste/Davids.APIGateway/actions/workflows/pull-request-ci.yml)
+[![Pull Request CI — CodeQL SAST](https://github.com/dav-Ste/Davids.APIGateway/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/dav-Ste/Davids.APIGateway/actions/workflows/codeql.yml)
+
 The .NET 10 API Gateway is the browser-facing YARP edge and **OpenID Connect Backend-for-Frontend (BFF)** for `Davids.Services.Identity` (customer OIDC authority), `Davids.Services.AdminIdentity` (administrator OIDC authority), `Davids.Services.Customers`, and `Davids.Frontend.Admin` (the Admin Web frontend).
 
 It enforces dual-authority **RS256** OIDC JWT validation via public JWKS discovery (**zero signing keys stored on the gateway**), runs a confidential **OAuth 2.1 Authorization Code + PKCE (`S256`)** BFF session (`AdminBffCookie` / `davids_admin_bff`) for `Davids.Frontend.Admin`, enforces CSRF checks (`X-Requested-With: DavidsAdmin` + same-origin `Origin`) on cookie-authenticated mutations, strips incoming `Cookie` and spoofed `X-Auth-*` headers, injects verified `Authorization: Bearer` + `X-Auth-*` headers downstream, and propagates correlation IDs and W3C distributed trace context.

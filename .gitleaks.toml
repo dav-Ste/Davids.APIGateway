@@ -38,12 +38,13 @@ paths = [
 ]
 
 [[allowlists]]
-description = "Allow non-secret xUnit test fixture identifiers and synthetic test keys in GatewayAuthTests"
+description = "Allow non-secret xUnit test fixture identifiers and synthetic test keys in xUnit tests"
 condition = "AND"
 paths = ['''(?:^|[\\/])tests[\\/].*Tests\.cs$''']
 regexTarget = "line"
 regexes = [
   '''tokenId:\s*"(?:revoked|active)-[a-z]+-\d+"''',
   '''"MasterKey"\s*:\s*"0123456789abcdef0123456789abcdef"''',
-  '''"BffClientSecret"\s*:\s*"secret-value-at-least-24-chars"'''
+  '''"BffClientSecret"\s*:\s*"secret-value-at-least-24-chars"''',
+  '''access token\s*->\s*rfc7009_revocation'''
 ]
