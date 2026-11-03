@@ -37,7 +37,8 @@ internal static class GatewayTestSecurity
         string? adminIdentityDestination = null,
         string? customersDestination = null,
         string? adminAuthority = null,
-        Action<IServiceCollection>? configureServices = null)
+        Action<IServiceCollection>? configureServices = null,
+        string frontendWebDestination = "http://127.0.0.1:9/")
     {
         return new WebApplicationFactory<Program>().WithWebHostBuilder(webHost =>
         {
@@ -75,6 +76,9 @@ internal static class GatewayTestSecurity
             webHost.UseSetting(
                 "ReverseProxy:Clusters:frontend-admin:Destinations:primary:Address",
                 frontendDestination);
+            webHost.UseSetting(
+                "ReverseProxy:Clusters:frontend-web:Destinations:primary:Address",
+                frontendWebDestination);
 
             webHost.ConfigureServices(services =>
             {
@@ -90,7 +94,7 @@ internal static class GatewayTestSecurity
     }
 
     public static string CreateTokenForRole(Guid subject, string role = "user", string? tokenId = null)
-        => string.Equals(role, "admin", StringComparison.Ordinal)
+        => GatewayIdentityPredicates.IsWorkforceRole(role)
             ? CreateAdminToken(subject, role, tokenId)
             : CreateCustomerToken(subject, role, tokenId);
 

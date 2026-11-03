@@ -1,6 +1,8 @@
 using System.Net.Http.Headers;
+using System.Security.Claims;
 using Davids.APIGateway.Infrastructure.Auth;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -12,13 +14,29 @@ public static class ReverseProxyExtensions
 {
     public const string VerifiedUserIdHeader = "X-Auth-User-Id";
     public const string VerifiedUserRoleHeader = "X-Auth-User-Role";
+    public const string VerifiedUserEmailHeader = "X-Auth-User-Email";
     public const string VerifiedTokenIdHeader = "X-Auth-Token-Id";
     public const string VerifiedSchemeHeader = "X-Auth-Scheme";
+    public const string VerifiedAuthorityHeader = "X-Auth-Authority";
+
+    private static readonly string[] SpoofableAuthHeaders =
+    [
+        VerifiedUserIdHeader,
+        VerifiedUserRoleHeader,
+        VerifiedUserEmailHeader,
+        VerifiedTokenIdHeader,
+        VerifiedSchemeHeader,
+        VerifiedAuthorityHeader,
+        "X-Auth-UserId",
+        "X-Auth-Role",
+        "X-Auth-Email"
+    ];
 
     private const string IdentityAddressKey = "ReverseProxy:Clusters:identity:Destinations:primary:Address";
     private const string AdminIdentityAddressKey = "ReverseProxy:Clusters:admin-identity:Destinations:primary:Address";
     private const string CustomersAddressKey = "ReverseProxy:Clusters:customers:Destinations:primary:Address";
     private const string FrontendAdminAddressKey = "ReverseProxy:Clusters:frontend-admin:Destinations:primary:Address";
+    private const string FrontendWebAddressKey = "ReverseProxy:Clusters:frontend-web:Destinations:primary:Address";
 
     public static IServiceCollection AddGatewayReverseProxy(
         this IServiceCollection services,
@@ -28,23 +46,27 @@ public static class ReverseProxyExtensions
         ValidateHttpAddress(configuration, AdminIdentityAddressKey, "admin-identity");
         ValidateHttpAddress(configuration, CustomersAddressKey, "customers");
         ValidateHttpAddress(configuration, FrontendAdminAddressKey, "frontend-admin");
+        if (!string.IsNullOrWhiteSpace(configuration[FrontendWebAddressKey]))
+        {
+            ValidateHttpAddress(configuration, FrontendWebAddressKey, "frontend-web");
+        }
 
         services.AddReverseProxy()
             .LoadFromConfig(configuration.GetSection("ReverseProxy"))
             .AddTransforms(builderContext =>
             {
-                var isFrontendCluster = string.Equals(
-                    builderContext.Cluster?.ClusterId,
-                    "frontend-admin",
-                    StringComparison.OrdinalIgnoreCase);
+                var clusterId = builderContext.Cluster?.ClusterId;
+                var isFrontendCluster =
+                    string.Equals(clusterId, "frontend-admin", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(clusterId, "frontend-web", StringComparison.OrdinalIgnoreCase);
 
                 builderContext.AddRequestTransform(transformContext =>
                 {
                     // Strip any client-supplied identity headers to prevent spoofing.
-                    transformContext.ProxyRequest.Headers.Remove(VerifiedUserIdHeader);
-                    transformContext.ProxyRequest.Headers.Remove(VerifiedUserRoleHeader);
-                    transformContext.ProxyRequest.Headers.Remove(VerifiedTokenIdHeader);
-                    transformContext.ProxyRequest.Headers.Remove(VerifiedSchemeHeader);
+                    foreach (var header in SpoofableAuthHeaders)
+                    {
+                        transformContext.ProxyRequest.Headers.Remove(header);
+                    }
 
                     // Overwrite X-Forwarded-For with the verified gateway client IP (never append to untrusted client headers).
                     transformContext.ProxyRequest.Headers.Remove("X-Forwarded-For");
@@ -66,41 +88,48 @@ public static class ReverseProxyExtensions
                         return ValueTask.CompletedTask;
                     }
 
-                    var user = transformContext.HttpContext.User;
-                    var activeIdentity =
-                        user?.Identities.FirstOrDefault(i =>
-                            i.IsAuthenticated &&
-                            (string.Equals(i.AuthenticationType, GatewayAuthPolicies.AdminBearerScheme, StringComparison.Ordinal) ||
-                             string.Equals(i.AuthenticationType, GatewayAuthPolicies.AdminBffCookieScheme, StringComparison.Ordinal)))
-                        ?? user?.Identities.FirstOrDefault(i => i.IsAuthenticated);
+                    var activeIdentity = SelectActiveBackendIdentity(
+                        transformContext.HttpContext.User,
+                        transformContext.HttpContext.Request);
 
                     if (activeIdentity is not null)
                     {
-                        var isAdminIdentity =
+                        var isWorkforceIdentity =
                             string.Equals(activeIdentity.AuthenticationType, GatewayAuthPolicies.AdminBearerScheme, StringComparison.Ordinal) ||
                             string.Equals(activeIdentity.AuthenticationType, GatewayAuthPolicies.AdminBffCookieScheme, StringComparison.Ordinal);
 
-                        if (isAdminIdentity &&
-                            transformContext.ProxyRequest.Headers.Authorization is null &&
-                            transformContext.HttpContext.Items.TryGetValue(GatewayAuthPolicies.VerifiedAdminRawTokenItemKey, out var rawObj) &&
-                            rawObj is string rawAdminToken &&
-                            !string.IsNullOrWhiteSpace(rawAdminToken))
+                        if (transformContext.ProxyRequest.Headers.Authorization is null)
                         {
-                            transformContext.ProxyRequest.Headers.Authorization =
-                                new AuthenticationHeaderValue("Bearer", rawAdminToken);
+                            var rawItemKey = isWorkforceIdentity
+                                ? GatewayAuthPolicies.VerifiedAdminRawTokenItemKey
+                                : GatewayAuthPolicies.VerifiedCustomerRawTokenItemKey;
+                            if (transformContext.HttpContext.Items.TryGetValue(rawItemKey, out var rawObj) &&
+                                rawObj is string rawToken &&
+                                !string.IsNullOrWhiteSpace(rawToken))
+                            {
+                                transformContext.ProxyRequest.Headers.Authorization =
+                                    new AuthenticationHeaderValue("Bearer", rawToken);
+                            }
                         }
 
                         var subject = activeIdentity.FindFirst("sub")?.Value;
                         var role = activeIdentity.FindFirst("role")?.Value;
+                        var email = activeIdentity.FindFirst("email")?.Value;
                         var tokenId = activeIdentity.FindFirst("jti")?.Value;
-                        if (string.IsNullOrWhiteSpace(tokenId) &&
-                            transformContext.HttpContext.Items.TryGetValue(GatewayAuthPolicies.VerifiedAdminTokenIdItemKey, out var jtiObj) &&
-                            jtiObj is string bffJti)
+                        if (string.IsNullOrWhiteSpace(tokenId))
                         {
-                            tokenId = bffJti;
+                            var jtiKey = isWorkforceIdentity
+                                ? GatewayAuthPolicies.VerifiedAdminTokenIdItemKey
+                                : GatewayAuthPolicies.VerifiedCustomerTokenIdItemKey;
+                            if (transformContext.HttpContext.Items.TryGetValue(jtiKey, out var jtiObj) &&
+                                jtiObj is string bffJti)
+                            {
+                                tokenId = bffJti;
+                            }
                         }
 
                         var scheme = activeIdentity.AuthenticationType;
+                        var authority = isWorkforceIdentity ? "employee" : "customer";
 
                         if (!string.IsNullOrWhiteSpace(subject))
                         {
@@ -112,6 +141,11 @@ public static class ReverseProxyExtensions
                             transformContext.ProxyRequest.Headers.TryAddWithoutValidation(VerifiedUserRoleHeader, role);
                         }
 
+                        if (!string.IsNullOrWhiteSpace(email))
+                        {
+                            transformContext.ProxyRequest.Headers.TryAddWithoutValidation(VerifiedUserEmailHeader, email);
+                        }
+
                         if (!string.IsNullOrWhiteSpace(tokenId))
                         {
                             transformContext.ProxyRequest.Headers.TryAddWithoutValidation(VerifiedTokenIdHeader, tokenId);
@@ -121,6 +155,8 @@ public static class ReverseProxyExtensions
                         {
                             transformContext.ProxyRequest.Headers.TryAddWithoutValidation(VerifiedSchemeHeader, scheme);
                         }
+
+                        transformContext.ProxyRequest.Headers.TryAddWithoutValidation(VerifiedAuthorityHeader, authority);
                     }
 
                     return ValueTask.CompletedTask;
@@ -137,6 +173,33 @@ public static class ReverseProxyExtensions
             });
 
         return services;
+    }
+
+    private static ClaimsIdentity? SelectActiveBackendIdentity(ClaimsPrincipal? user, HttpRequest request)
+    {
+        if (user is null)
+        {
+            return null;
+        }
+
+        var path = request.Path;
+        var prefersCustomer =
+            path.StartsWithSegments("/identity") ||
+            path.StartsWithSegments("/customers/me") ||
+            (path.Equals("/customers", StringComparison.OrdinalIgnoreCase) && HttpMethods.IsPost(request.Method)) ||
+            GatewaySecurityExtensions.IsCustomerHost(request.Host.Host);
+
+        if (prefersCustomer)
+        {
+            return GatewayIdentityPredicates.FindVerifiedCustomerIdentity(user)
+                ?? user.Identities.FirstOrDefault(i => i.IsAuthenticated);
+        }
+
+        return user.Identities.FirstOrDefault(i =>
+                   i.IsAuthenticated &&
+                   (string.Equals(i.AuthenticationType, GatewayAuthPolicies.AdminBearerScheme, StringComparison.Ordinal) ||
+                    string.Equals(i.AuthenticationType, GatewayAuthPolicies.AdminBffCookieScheme, StringComparison.Ordinal)))
+               ?? user.Identities.FirstOrDefault(i => i.IsAuthenticated);
     }
 
     private static void ValidateHttpAddress(IConfiguration configuration, string key, string destinationName)

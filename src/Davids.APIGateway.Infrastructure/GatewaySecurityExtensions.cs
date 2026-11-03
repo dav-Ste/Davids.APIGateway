@@ -42,14 +42,15 @@ public sealed class GatewayAuthorizationResultHandler : IAuthorizationMiddleware
             return;
         }
 
-        if (context.Items.ContainsKey(GatewayAuthPolicies.CsrfRejectedItemKey))
+        if (context.Items.ContainsKey(GatewayAuthPolicies.CsrfRejectedItemKey) ||
+            context.Items.ContainsKey(GatewayAuthPolicies.CustomerCsrfRejectedItemKey))
         {
             GatewaySecurityMetrics.RecordBffCsrfRejection("proxy");
             context.RequestServices
-                .GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>()
+                .GetRequiredService<ILoggerFactory>()
                 .CreateLogger("Davids.Security.Audit")
                 .LogWarning(
-                    "Audit: rejected cookie-authenticated administrator request failing CSRF check from {ClientIp} on {Path} (SecurityAuditEvent={SecurityAuditEvent}, CorrelationId={CorrelationId}).",
+                    "Audit: rejected cookie-authenticated BFF request failing CSRF check from {ClientIp} on {Path} (SecurityAuditEvent={SecurityAuditEvent}, CorrelationId={CorrelationId}).",
                     GatewaySecurityExtensions.ResolveNormalizedIp(context),
                     context.Request.Path.Value,
                     "BffCsrfRejected",
@@ -59,7 +60,7 @@ public sealed class GatewayAuthorizationResultHandler : IAuthorizationMiddleware
             await context.Response.WriteAsJsonAsync(new
             {
                 code = "csrf_rejected",
-                reason = "Missing or invalid CSRF verification header for cookie-authenticated administrator request."
+                reason = "Missing or invalid CSRF verification header for cookie-authenticated request."
             }, context.RequestAborted);
             return;
         }
@@ -73,6 +74,14 @@ public sealed class GatewayAuthorizationResultHandler : IAuthorizationMiddleware
                 code = "forbidden",
                 reason = "Your account is not permitted to perform this action."
             }, context.RequestAborted);
+            return;
+        }
+
+        if (IsBrowserCustomerFrontendNavigation(context.Request, out var customerLoginPath))
+        {
+            context.Response.StatusCode = StatusCodes.Status302Found;
+            context.Response.Headers.Location = customerLoginPath;
+            context.Response.Headers.CacheControl = "no-store";
             return;
         }
 
@@ -94,6 +103,36 @@ public sealed class GatewayAuthorizationResultHandler : IAuthorizationMiddleware
         }, context.RequestAborted);
     }
 
+    private static bool IsBrowserCustomerFrontendNavigation(HttpRequest request, out string loginPath)
+    {
+        loginPath = "/portal/login";
+        if (!HttpMethods.IsGet(request.Method) && !HttpMethods.IsHead(request.Method))
+        {
+            return false;
+        }
+
+        var accept = request.Headers.Accept.ToString();
+        if (!accept.Contains("text/html", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (request.Path.StartsWithSegments("/portal"))
+        {
+            loginPath = "/portal/login";
+            return true;
+        }
+
+        if (GatewaySecurityExtensions.IsCustomerHost(request.Host.Host) &&
+            !IsApiOrAuthPath(request.Path))
+        {
+            loginPath = "/login";
+            return true;
+        }
+
+        return false;
+    }
+
     private static bool IsBrowserAdminFrontendNavigation(HttpRequest request)
     {
         if (!HttpMethods.IsGet(request.Method) && !HttpMethods.IsHead(request.Method))
@@ -101,10 +140,7 @@ public sealed class GatewayAuthorizationResultHandler : IAuthorizationMiddleware
             return false;
         }
 
-        if (request.Path.StartsWithSegments("/identity") ||
-            request.Path.StartsWithSegments("/admin-identity") ||
-            request.Path.StartsWithSegments("/customers") ||
-            request.Path.StartsWithSegments("/auth"))
+        if (IsApiOrAuthPath(request.Path) || request.Path.StartsWithSegments("/portal"))
         {
             return false;
         }
@@ -112,18 +148,38 @@ public sealed class GatewayAuthorizationResultHandler : IAuthorizationMiddleware
         var accept = request.Headers.Accept.ToString();
         return accept.Contains("text/html", StringComparison.OrdinalIgnoreCase);
     }
+
+    private static bool IsApiOrAuthPath(PathString path)
+        => path.StartsWithSegments("/identity") ||
+           path.StartsWithSegments("/customer-accounts") ||
+           path.StartsWithSegments("/admin-identity") ||
+           path.StartsWithSegments("/customers") ||
+           path.StartsWithSegments("/auth") ||
+           path.StartsWithSegments("/customer-auth");
 }
 
 public static class GatewaySecurityExtensions
 {
+    public static bool IsCustomerHost(string? host)
+    {
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            return false;
+        }
+
+        return host.StartsWith("portal.", StringComparison.OrdinalIgnoreCase) ||
+               host.StartsWith("web.", StringComparison.OrdinalIgnoreCase) ||
+               host.StartsWith("customer.", StringComparison.OrdinalIgnoreCase);
+    }
+
     public static IServiceCollection AddGatewaySecurity(
         this IServiceCollection services,
         IConfiguration configuration,
         IHostEnvironment environment)
     {
-        var customerOidc = configuration.GetSection("CustomerOidc").Get<GatewayOidcAuthoritySettings>()
-            ?? new GatewayOidcAuthoritySettings();
-        var customerStaticKey = customerOidc.ValidateAndResolveStaticPublicKey("CustomerOidc");
+        var customerOidc = configuration.GetSection("CustomerOidc").Get<GatewayCustomerOidcSettings>()
+            ?? new GatewayCustomerOidcSettings();
+        var customerStaticKey = customerOidc.ValidateCustomerSettings();
 
         var adminOidc = configuration.GetSection("AdminOidc").Get<GatewayAdminOidcSettings>()
             ?? new GatewayAdminOidcSettings();
@@ -132,14 +188,22 @@ public static class GatewaySecurityExtensions
         var adminClusterAddress =
             configuration["ReverseProxy:Clusters:admin-identity:Destinations:primary:Address"]
             ?? "http://localhost:5014/";
-        var clusterFallback = new IConfigurationFallbackCluster(adminClusterAddress);
+        var identityClusterAddress =
+            configuration["ReverseProxy:Clusters:identity:Destinations:primary:Address"]
+            ?? "http://localhost:5004/";
+        var clusterFallback = new IConfigurationFallbackCluster(adminClusterAddress, identityClusterAddress);
 
+        services.AddSingleton<GatewayOidcAuthoritySettings>(customerOidc);
         services.AddSingleton(customerOidc);
         services.AddSingleton(adminOidc);
         services.AddSingleton(clusterFallback);
         services.AddDataProtection();
         AddGatewayRateLimiting(services, configuration);
         services.AddHttpClient(GatewayAuthPolicies.BackchannelHttpClientName, client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(30);
+        });
+        services.AddHttpClient(GatewayAuthPolicies.CustomerBackchannelHttpClientName, client =>
         {
             client.Timeout = TimeSpan.FromSeconds(30);
         });
@@ -224,6 +288,244 @@ public static class GatewaySecurityExtensions
                     }
                 };
             })
+            .AddCookie(GatewayAuthPolicies.CustomerBffCookieScheme, options =>
+            {
+                options.Cookie.Name = GatewayAuthPolicies.CustomerBffCookieName;
+                options.Cookie.HttpOnly = true;
+                options.Cookie.SameSite = SameSiteMode.Lax;
+                options.Cookie.SecurePolicy = cookieSecurePolicy;
+                options.Cookie.Path = "/";
+                options.ExpireTimeSpan = TimeSpan.FromHours(Math.Max(1, customerOidc.SessionHours));
+                options.SlidingExpiration = false;
+
+                options.Events = new CookieAuthenticationEvents
+                {
+                    OnValidatePrincipal = async context =>
+                    {
+                        var subject = context.Principal?.FindFirstValue("sub");
+                        var role = context.Principal?.FindFirstValue("role");
+                        if (!Guid.TryParse(subject, out var customerId) || customerId == Guid.Empty ||
+                            !string.Equals(role, "user", StringComparison.Ordinal))
+                        {
+                            context.RejectPrincipal();
+                            return;
+                        }
+
+                        var method = context.HttpContext.Request.Method;
+                        var isSafeMethod = HttpMethods.IsGet(method) ||
+                                           HttpMethods.IsHead(method) ||
+                                           HttpMethods.IsOptions(method);
+                        if (!isSafeMethod && !GatewayCustomerOidcSettings.HasValidCsrfContext(context.HttpContext))
+                        {
+                            context.HttpContext.Items[GatewayAuthPolicies.CustomerCsrfRejectedItemKey] = true;
+                            context.RejectPrincipal();
+                            return;
+                        }
+
+                        var accessToken = context.Properties.GetTokenValue("access_token");
+                        var refreshToken = context.Properties.GetTokenValue("refresh_token");
+                        var expiresAtRaw = context.Properties.GetTokenValue("expires_at");
+
+                        if (string.IsNullOrWhiteSpace(accessToken))
+                        {
+                            context.RejectPrincipal();
+                            return;
+                        }
+
+                        if (DateTimeOffset.TryParse(expiresAtRaw, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var expiresAt) &&
+                            expiresAt <= DateTimeOffset.UtcNow.AddSeconds(60))
+                        {
+                            if (string.IsNullOrWhiteSpace(refreshToken))
+                            {
+                                context.RejectPrincipal();
+                                return;
+                            }
+
+                            var refreshed = await TryRefreshCustomerTokensAsync(
+                                context.HttpContext,
+                                customerOidc,
+                                clusterFallback,
+                                refreshToken);
+                            if (refreshed is null)
+                            {
+                                context.RejectPrincipal();
+                                return;
+                            }
+
+                            accessToken = refreshed.Value.AccessToken;
+                            var updatedTokens = new List<AuthenticationToken>
+                            {
+                                new() { Name = "access_token", Value = refreshed.Value.AccessToken },
+                                new() { Name = "refresh_token", Value = refreshed.Value.RefreshToken },
+                                new() { Name = "expires_at", Value = refreshed.Value.ExpiresAt.ToString("o", CultureInfo.InvariantCulture) }
+                            };
+                            if (!string.IsNullOrWhiteSpace(refreshed.Value.IdToken))
+                            {
+                                updatedTokens.Add(new AuthenticationToken { Name = "id_token", Value = refreshed.Value.IdToken });
+                            }
+
+                            context.Properties.StoreTokens(updatedTokens);
+                            context.ShouldRenew = true;
+                        }
+
+                        var handler = new JwtSecurityTokenHandler();
+                        if (!handler.CanReadToken(accessToken))
+                        {
+                            context.RejectPrincipal();
+                            return;
+                        }
+
+                        var jwt = handler.ReadJwtToken(accessToken);
+                        if (string.IsNullOrWhiteSpace(jwt.Id))
+                        {
+                            context.RejectPrincipal();
+                            return;
+                        }
+
+                        var revocation = context.HttpContext.RequestServices.GetRequiredService<IGatewayTokenRevocation>();
+                        if (await revocation.IsRevokedAsync(jwt.Id, context.HttpContext.RequestAborted))
+                        {
+                            context.RejectPrincipal();
+                            await context.HttpContext.SignOutAsync(GatewayAuthPolicies.CustomerBffCookieScheme);
+                            return;
+                        }
+
+                        context.HttpContext.Items[GatewayAuthPolicies.VerifiedCustomerRawTokenItemKey] = accessToken;
+                        context.HttpContext.Items[GatewayAuthPolicies.VerifiedCustomerTokenIdItemKey] = jwt.Id;
+                    }
+                };
+            })
+            .AddOpenIdConnect(GatewayAuthPolicies.CustomerOidcScheme, options =>
+            {
+                options.SignInScheme = GatewayAuthPolicies.CustomerBffCookieScheme;
+                options.RequireHttpsMetadata = requireHttpsMetadata;
+                options.ClientId = customerOidc.BffClientId;
+                options.ResponseType = OpenIdConnectResponseType.Code;
+                options.ResponseMode = OpenIdConnectResponseMode.Query;
+                options.UsePkce = true;
+                options.SaveTokens = true;
+                options.GetClaimsFromUserInfoEndpoint = false;
+                options.MapInboundClaims = false;
+                options.CallbackPath = "/signin-customer-oidc";
+                options.SignedOutCallbackPath = "/signout-callback-customer-oidc";
+
+                options.CorrelationCookie.Name = GatewayAuthPolicies.CustomerOidcCorrelationCookiePrefix;
+                options.CorrelationCookie.HttpOnly = true;
+                options.CorrelationCookie.SameSite = SameSiteMode.Lax;
+                options.CorrelationCookie.SecurePolicy = cookieSecurePolicy;
+
+                options.NonceCookie.Name = GatewayAuthPolicies.CustomerOidcNonceCookiePrefix;
+                options.NonceCookie.HttpOnly = true;
+                options.NonceCookie.SameSite = SameSiteMode.Lax;
+                options.NonceCookie.SecurePolicy = cookieSecurePolicy;
+
+                options.Scope.Clear();
+                options.Scope.Add("openid");
+                options.Scope.Add("email");
+                options.Scope.Add("profile");
+                options.Scope.Add("roles");
+                options.Scope.Add("offline_access");
+                options.Scope.Add(customerOidc.Audience);
+
+                if (!string.IsNullOrWhiteSpace(customerOidc.MetadataAddress))
+                {
+                    options.MetadataAddress = customerOidc.MetadataAddress;
+                }
+                else
+                {
+                    var fallbackIssuer = customerOidc.EffectiveIssuer ?? "https://identity.davids.local/";
+                    options.Configuration = new OpenIdConnectConfiguration
+                    {
+                        Issuer = fallbackIssuer,
+                        AuthorizationEndpoint = customerOidc.PublicAuthorizeEndpoint,
+                        TokenEndpoint = customerOidc.ResolveTokenEndpoint(clusterFallback)
+                    };
+                    if (customerStaticKey is not null)
+                    {
+                        options.Configuration.SigningKeys.Add(customerStaticKey);
+                    }
+                }
+
+                options.TokenValidationParameters = new TokenValidationParameters
+                {
+                    ValidateIssuer = !string.IsNullOrWhiteSpace(customerOidc.EffectiveIssuer),
+                    ValidIssuer = customerOidc.EffectiveIssuer,
+                    ValidateAudience = true,
+                    ValidAudience = customerOidc.BffClientId,
+                    ValidateLifetime = true,
+                    ValidAlgorithms = [SecurityAlgorithms.RsaSha256],
+                    NameClaimType = "sub",
+                    RoleClaimType = "role"
+                };
+
+                options.Events = new OpenIdConnectEvents
+                {
+                    OnRedirectToIdentityProvider = context =>
+                    {
+                        if (!string.IsNullOrWhiteSpace(customerOidc.PublicAuthorizeEndpoint))
+                        {
+                            context.ProtocolMessage.IssuerAddress =
+                                customerOidc.PublicAuthorizeEndpoint.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                                customerOidc.PublicAuthorizeEndpoint.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+                                    ? customerOidc.PublicAuthorizeEndpoint
+                                    : $"{context.Request.Scheme}://{context.Request.Host}{customerOidc.PublicAuthorizeEndpoint}";
+                        }
+
+                        return Task.CompletedTask;
+                    },
+                    OnTokenValidated = context =>
+                    {
+                        var auditLogger = context.HttpContext.RequestServices
+                            .GetRequiredService<ILoggerFactory>()
+                            .CreateLogger("Davids.Security.Audit");
+                        var clientIp = ResolveNormalizedIp(context.HttpContext);
+                        var correlationId = context.HttpContext.TraceIdentifier;
+                        var sub = context.Principal?.FindFirstValue("sub");
+                        var role = context.Principal?.FindFirstValue("role");
+                        if (!Guid.TryParse(sub, out var customerId) || customerId == Guid.Empty ||
+                            !string.Equals(role, "user", StringComparison.Ordinal))
+                        {
+                            auditLogger.LogWarning(
+                                "Audit: rejected customer BFF OIDC callback without valid customer identity from {ClientIp} (CorrelationId={CorrelationId}).",
+                                clientIp,
+                                correlationId);
+                            context.Fail("OIDC ID token did not carry a valid customer identity.");
+                            return Task.CompletedTask;
+                        }
+
+                        var normalizedClaims = context.Principal!.Claims.ToList();
+                        var bffIdentity = new ClaimsIdentity(
+                            normalizedClaims,
+                            GatewayAuthPolicies.CustomerBffCookieScheme,
+                            "sub",
+                            "role");
+                        context.Principal = new ClaimsPrincipal(bffIdentity);
+                        auditLogger.LogInformation(
+                            "Audit: established customer BFF OIDC session for {CustomerId} from {ClientIp} (CorrelationId={CorrelationId}).",
+                            customerId,
+                            clientIp,
+                            correlationId);
+                        return Task.CompletedTask;
+                    },
+                    OnRemoteFailure = context =>
+                    {
+                        var auditLogger = context.HttpContext.RequestServices
+                            .GetRequiredService<ILoggerFactory>()
+                            .CreateLogger("Davids.Security.Audit");
+                        auditLogger.LogWarning(
+                            context.Failure,
+                            "Audit: customer BFF OIDC callback failed from {ClientIp} (CorrelationId={CorrelationId}).",
+                            ResolveNormalizedIp(context.HttpContext),
+                            context.HttpContext.TraceIdentifier);
+                        var target = IsCustomerHost(context.Request.Host.Host)
+                            ? "/login?error=oidc_failed"
+                            : "/portal/login?error=oidc_failed";
+                        context.Response.Redirect(target);
+                        context.HandleResponse();
+                        return Task.CompletedTask;
+                    }
+                };
+            })
             .AddJwtBearer(GatewayAuthPolicies.AdminBearerScheme, options =>
             {
                 options.MapInboundClaims = false;
@@ -274,10 +576,10 @@ public static class GatewaySecurityExtensions
                         var role = context.Principal?.FindFirst("role")?.Value;
                         if (!Guid.TryParse(subject, out var subjectId) || subjectId == Guid.Empty ||
                             string.IsNullOrWhiteSpace(tokenId) ||
-                            !string.Equals(role, "admin", StringComparison.Ordinal))
+                            !GatewayIdentityPredicates.IsWorkforceRole(role))
                         {
                             context.HttpContext.Items.Remove(GatewayAuthPolicies.VerifiedAdminRawTokenItemKey);
-                            context.Fail("AdminBearer accepts valid RS256 administrator ('admin') tokens only.");
+                            context.Fail("AdminBearer accepts valid RS256 workforce ('admin', 'support', 'auditor') tokens only.");
                             return;
                         }
 
@@ -316,7 +618,7 @@ public static class GatewaySecurityExtensions
                         var subject = context.Principal?.FindFirstValue("sub");
                         var role = context.Principal?.FindFirstValue("role");
                         if (!Guid.TryParse(subject, out var adminId) || adminId == Guid.Empty ||
-                            !string.Equals(role, "admin", StringComparison.Ordinal))
+                            !GatewayIdentityPredicates.IsWorkforceRole(role))
                         {
                             context.RejectPrincipal();
                             return;
@@ -413,8 +715,6 @@ public static class GatewaySecurityExtensions
                 options.ClientId = adminOidc.BffClientId;
                 options.ClientSecret = adminOidc.BffClientSecret;
                 options.ResponseType = OpenIdConnectResponseType.Code;
-                // Use standard OAuth 2.1 query redirect (302 Found -> /signin-oidc?code=...&state=...)
-                // rather than ASP.NET Core's default form_post HTML page, whose inline onload JS is blocked by CSP script-src 'self'.
                 options.ResponseMode = OpenIdConnectResponseMode.Query;
                 options.UsePkce = true;
                 options.SaveTokens = true;
@@ -490,20 +790,20 @@ public static class GatewaySecurityExtensions
                     OnTokenValidated = context =>
                     {
                         var auditLogger = context.HttpContext.RequestServices
-                            .GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>()
+                            .GetRequiredService<ILoggerFactory>()
                             .CreateLogger("Davids.Security.Audit");
                         var clientIp = ResolveNormalizedIp(context.HttpContext);
                         var correlationId = context.HttpContext.TraceIdentifier;
                         var sub = context.Principal?.FindFirstValue("sub");
                         var role = context.Principal?.FindFirstValue("role");
                         if (!Guid.TryParse(sub, out var adminId) || adminId == Guid.Empty ||
-                            !string.Equals(role, "admin", StringComparison.Ordinal))
+                            !GatewayIdentityPredicates.IsWorkforceRole(role))
                         {
                             auditLogger.LogWarning(
-                                "Audit: rejected BFF OIDC callback without valid admin identity from {ClientIp} (CorrelationId={CorrelationId}).",
+                                "Audit: rejected BFF OIDC callback without valid workforce identity from {ClientIp} (CorrelationId={CorrelationId}).",
                                 clientIp,
                                 correlationId);
-                            context.Fail("OIDC ID token did not carry a valid administrator identity.");
+                            context.Fail("OIDC ID token did not carry a valid workforce identity.");
                             return Task.CompletedTask;
                         }
 
@@ -524,7 +824,7 @@ public static class GatewaySecurityExtensions
                     OnRemoteFailure = context =>
                     {
                         var auditLogger = context.HttpContext.RequestServices
-                            .GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>()
+                            .GetRequiredService<ILoggerFactory>()
                             .CreateLogger("Davids.Security.Audit");
                         auditLogger.LogWarning(
                             context.Failure,
@@ -539,55 +839,67 @@ public static class GatewaySecurityExtensions
             });
 
         services.AddSingleton<IAuthorizationHandler, AdminOnlyAuthorizationHandler>();
+        services.AddSingleton<IAuthorizationHandler, WorkforceReadAuthorizationHandler>();
+        services.AddSingleton<IAuthorizationHandler, WorkforceMutateAuthorizationHandler>();
         services.AddSingleton<IAuthorizationHandler, CustomerOnlyAuthorizationHandler>();
         services.AddSingleton<IAuthorizationHandler, ResourceOwnerOrAdminHandler>();
         services.AddSingleton<IAuthorizationMiddlewareResultHandler, GatewayAuthorizationResultHandler>();
 
         services.AddAuthorization(options =>
         {
-            options.FallbackPolicy = new AuthorizationPolicyBuilder(
-                    GatewayAuthPolicies.CustomerBearerScheme,
-                    GatewayAuthPolicies.AdminBearerScheme,
-                    GatewayAuthPolicies.AdminBffCookieScheme)
+            string[] allSchemes =
+            [
+                GatewayAuthPolicies.CustomerBearerScheme,
+                GatewayAuthPolicies.CustomerBffCookieScheme,
+                GatewayAuthPolicies.AdminBearerScheme,
+                GatewayAuthPolicies.AdminBffCookieScheme
+            ];
+
+            options.FallbackPolicy = new AuthorizationPolicyBuilder(allSchemes)
                 .RequireAuthenticatedUser()
                 .Build();
 
             options.AddPolicy(GatewayAuthPolicies.Authenticated, policy =>
-                policy.AddAuthenticationSchemes(
-                        GatewayAuthPolicies.CustomerBearerScheme,
-                        GatewayAuthPolicies.AdminBearerScheme,
-                        GatewayAuthPolicies.AdminBffCookieScheme)
+                policy.AddAuthenticationSchemes(allSchemes)
                     .RequireAuthenticatedUser());
 
             options.AddPolicy(GatewayAuthPolicies.CustomerAuthenticated, policy =>
-                policy.AddAuthenticationSchemes(
-                        GatewayAuthPolicies.CustomerBearerScheme,
-                        GatewayAuthPolicies.AdminBearerScheme,
-                        GatewayAuthPolicies.AdminBffCookieScheme)
+                policy.AddAuthenticationSchemes(allSchemes)
+                    .RequireAuthenticatedUser()
+                    .AddRequirements(new CustomerOnlyRequirement()));
+
+            options.AddPolicy(GatewayAuthPolicies.CustomerFrontend, policy =>
+                policy.AddAuthenticationSchemes(allSchemes)
                     .RequireAuthenticatedUser()
                     .AddRequirements(new CustomerOnlyRequirement()));
 
             options.AddPolicy(GatewayAuthPolicies.CustomersAdmin, policy =>
-                policy.AddAuthenticationSchemes(
-                        GatewayAuthPolicies.AdminBearerScheme,
-                        GatewayAuthPolicies.AdminBffCookieScheme,
-                        GatewayAuthPolicies.CustomerBearerScheme)
+                policy.AddAuthenticationSchemes(allSchemes)
                     .RequireAuthenticatedUser()
                     .AddRequirements(new AdminOnlyRequirement()));
+
+            options.AddPolicy(GatewayAuthPolicies.WorkforceRead, policy =>
+                policy.AddAuthenticationSchemes(allSchemes)
+                    .RequireAuthenticatedUser()
+                    .AddRequirements(new WorkforceReadRequirement()));
+
+            options.AddPolicy(GatewayAuthPolicies.WorkforceMutate, policy =>
+                policy.AddAuthenticationSchemes(allSchemes)
+                    .RequireAuthenticatedUser()
+                    .AddRequirements(new WorkforceMutateRequirement()));
+
+            options.AddPolicy(GatewayAuthPolicies.WorkforceSelfMutate, policy =>
+                policy.AddAuthenticationSchemes(allSchemes)
+                    .RequireAuthenticatedUser()
+                    .AddRequirements(new WorkforceReadRequirement()));
 
             options.AddPolicy(GatewayAuthPolicies.AdminFrontend, policy =>
-                policy.AddAuthenticationSchemes(
-                        GatewayAuthPolicies.AdminBearerScheme,
-                        GatewayAuthPolicies.AdminBffCookieScheme,
-                        GatewayAuthPolicies.CustomerBearerScheme)
+                policy.AddAuthenticationSchemes(allSchemes)
                     .RequireAuthenticatedUser()
-                    .AddRequirements(new AdminOnlyRequirement()));
+                    .AddRequirements(new WorkforceReadRequirement()));
 
             options.AddPolicy(GatewayAuthPolicies.ResourceOwnerOrAdmin, policy =>
-                policy.AddAuthenticationSchemes(
-                        GatewayAuthPolicies.CustomerBearerScheme,
-                        GatewayAuthPolicies.AdminBearerScheme,
-                        GatewayAuthPolicies.AdminBffCookieScheme)
+                policy.AddAuthenticationSchemes(allSchemes)
                     .RequireAuthenticatedUser()
                     .AddRequirements(new ResourceOwnerOrAdminRequirement()));
         });
@@ -601,25 +913,58 @@ public static class GatewaySecurityExtensions
         string? IdToken,
         DateTimeOffset ExpiresAt);
 
-    private static async Task<RefreshedTokenSet?> TryRefreshAdminTokensAsync(
+    private static Task<RefreshedTokenSet?> TryRefreshAdminTokensAsync(
         HttpContext httpContext,
         GatewayAdminOidcSettings adminOidc,
         IConfigurationFallbackCluster clusterFallback,
+        string refreshToken)
+        => TryRefreshOidcTokensAsync(
+            httpContext,
+            GatewayAuthPolicies.BackchannelHttpClientName,
+            adminOidc.ResolveTokenEndpoint(clusterFallback),
+            adminOidc.BffClientId,
+            adminOidc.BffClientSecret,
+            refreshToken);
+
+    private static Task<RefreshedTokenSet?> TryRefreshCustomerTokensAsync(
+        HttpContext httpContext,
+        GatewayCustomerOidcSettings customerOidc,
+        IConfigurationFallbackCluster clusterFallback,
+        string refreshToken)
+        => TryRefreshOidcTokensAsync(
+            httpContext,
+            GatewayAuthPolicies.CustomerBackchannelHttpClientName,
+            customerOidc.ResolveTokenEndpoint(clusterFallback),
+            customerOidc.BffClientId,
+            clientSecret: null,
+            refreshToken);
+
+    private static async Task<RefreshedTokenSet?> TryRefreshOidcTokensAsync(
+        HttpContext httpContext,
+        string httpClientName,
+        string tokenEndpoint,
+        string clientId,
+        string? clientSecret,
         string refreshToken)
     {
         try
         {
             var factory = httpContext.RequestServices.GetRequiredService<IHttpClientFactory>();
-            var client = factory.CreateClient(GatewayAuthPolicies.BackchannelHttpClientName);
+            var client = factory.CreateClient(httpClientName);
+            var form = new Dictionary<string, string>
+            {
+                ["grant_type"] = "refresh_token",
+                ["client_id"] = clientId,
+                ["refresh_token"] = refreshToken
+            };
+            if (!string.IsNullOrWhiteSpace(clientSecret))
+            {
+                form["client_secret"] = clientSecret;
+            }
+
             using var response = await client.PostAsync(
-                adminOidc.ResolveTokenEndpoint(clusterFallback),
-                new FormUrlEncodedContent(new Dictionary<string, string>
-                {
-                    ["grant_type"] = "refresh_token",
-                    ["client_id"] = adminOidc.BffClientId,
-                    ["client_secret"] = adminOidc.BffClientSecret,
-                    ["refresh_token"] = refreshToken
-                }),
+                tokenEndpoint,
+                new FormUrlEncodedContent(form),
                 httpContext.RequestAborted);
 
             if (!response.IsSuccessStatusCode)
@@ -675,7 +1020,7 @@ public static class GatewaySecurityExtensions
             {
                 GatewaySecurityMetrics.RecordRateLimitRejection("gateway");
                 rejectedContext.HttpContext.RequestServices
-                    .GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>()
+                    .GetRequiredService<ILoggerFactory>()
                     .CreateLogger("Davids.Security.Audit")
                     .LogWarning(
                         "Audit: gateway rate-limit rejected request from {ClientIp} on {Path} (SecurityAuditEvent={SecurityAuditEvent}, CorrelationId={CorrelationId}).",

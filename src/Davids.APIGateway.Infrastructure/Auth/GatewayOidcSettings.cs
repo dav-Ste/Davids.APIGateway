@@ -81,6 +81,41 @@ public class GatewayOidcAuthoritySettings
     }
 }
 
+public sealed class GatewayCustomerOidcSettings : GatewayOidcAuthoritySettings
+{
+    public string BffClientId { get; set; } = "davids-web";
+    public string PublicAuthorizeEndpoint { get; set; } = "/identity/connect/authorize";
+    public int SessionHours { get; set; } = 8;
+
+    public RsaSecurityKey? ValidateCustomerSettings()
+    {
+        var key = ValidateAndResolveStaticPublicKey("CustomerOidc");
+        if (string.IsNullOrWhiteSpace(BffClientId))
+        {
+            throw new InvalidOperationException("CustomerOidc:BffClientId is required.");
+        }
+
+        return key;
+    }
+
+    public string ResolveTokenEndpoint(IConfigurationFallbackCluster clusterFallback)
+    {
+        var baseUrl = !string.IsNullOrWhiteSpace(Authority) ? Authority : clusterFallback.IdentityClusterAddress;
+        return baseUrl.TrimEnd('/') + "/connect/token";
+    }
+
+    public string ResolveRevocationEndpoint(IConfigurationFallbackCluster clusterFallback)
+    {
+        var baseUrl = !string.IsNullOrWhiteSpace(Authority) ? Authority : clusterFallback.IdentityClusterAddress;
+        return baseUrl.TrimEnd('/') + "/connect/revocation";
+    }
+
+    public static bool HasValidCsrfContext(HttpContext context)
+        => GatewayAdminOidcSettings.HasValidHeaderAndOrigin(
+            context,
+            GatewayAuthPolicies.CustomerCsrfHeaderValue);
+}
+
 public sealed class GatewayAdminOidcSettings : GatewayOidcAuthoritySettings
 {
     public GatewayAdminOidcSettings()
@@ -138,10 +173,13 @@ public sealed class GatewayAdminOidcSettings : GatewayOidcAuthoritySettings
     }
 
     public static bool HasValidCsrfContext(HttpContext context)
+        => HasValidHeaderAndOrigin(context, GatewayAuthPolicies.AdminCsrfHeaderValue);
+
+    internal static bool HasValidHeaderAndOrigin(HttpContext context, string expectedCsrfValue)
     {
         if (!string.Equals(
                 context.Request.Headers[GatewayAuthPolicies.AdminCsrfHeaderName].ToString(),
-                GatewayAuthPolicies.AdminCsrfHeaderValue,
+                expectedCsrfValue,
                 StringComparison.Ordinal))
         {
             return false;
@@ -161,4 +199,6 @@ public sealed class GatewayAdminOidcSettings : GatewayOidcAuthoritySettings
     }
 }
 
-public sealed record IConfigurationFallbackCluster(string AdminIdentityClusterAddress);
+public sealed record IConfigurationFallbackCluster(
+    string AdminIdentityClusterAddress,
+    string IdentityClusterAddress = "http://localhost:5004/");
