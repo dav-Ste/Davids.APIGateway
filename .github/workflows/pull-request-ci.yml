@@ -124,10 +124,22 @@ jobs:
           severity-cutoff: high
           output-format: sarif
 
+      - name: Install SHA-256 verified Trivy v0.76.1
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/trivy-bin"
+          curl -fsSL https://github.com/aquasecurity/trivy/releases/download/v0.76.1/trivy_0.76.1_Linux-64bit.tar.gz -o "$RUNNER_TEMP/trivy.tar.gz"
+          echo "c7cbe3137fb8a48a17574bede3dd6beb16742d1e9772929940fc90082c39d9c0  $RUNNER_TEMP/trivy.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/trivy.tar.gz" -C "$RUNNER_TEMP/trivy-bin"
+          chmod +x "$RUNNER_TEMP/trivy-bin/trivy"
+          rm -f "$RUNNER_TEMP/trivy.tar.gz"
+          echo "$RUNNER_TEMP/trivy-bin" >> "$GITHUB_PATH"
+
       # Exclude centralized MSBuild artifacts/ so Trivy scans source lockfiles & IaC only
       - name: Scan lockfiles with SHA-pinned Trivy
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          skip-setup-trivy: "true"
           scan-type: fs
           scan-ref: ./Davids.APIGateway
           skip-dirs: "**/artifacts,**/bin,**/obj,**/TestResults"
@@ -162,6 +174,7 @@ jobs:
       - name: Scan container image with SHA-pinned Trivy
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          skip-setup-trivy: "true"
           image-ref: "davids-ci/davids-api-gateway:pr"
           scanners: vuln,misconfig
           severity: CRITICAL,HIGH
