@@ -38,7 +38,11 @@ internal static class GatewayTestSecurity
         string? customersDestination = null,
         string? adminAuthority = null,
         Action<IServiceCollection>? configureServices = null,
-        string frontendWebDestination = "http://127.0.0.1:9/")
+        string frontendWebDestination = "http://127.0.0.1:9/",
+        string? productsDestination = null,
+        string? basketsDestination = null,
+        string? ordersDestination = null,
+        string? paymentsDestination = null)
     {
         return new WebApplicationFactory<Program>().WithWebHostBuilder(webHost =>
         {
@@ -73,6 +77,18 @@ internal static class GatewayTestSecurity
             webHost.UseSetting(
                 "ReverseProxy:Clusters:customers:Destinations:primary:Address",
                 customersDestination ?? backendDestination);
+            webHost.UseSetting(
+                "ReverseProxy:Clusters:products:Destinations:primary:Address",
+                productsDestination ?? backendDestination);
+            webHost.UseSetting(
+                "ReverseProxy:Clusters:baskets:Destinations:primary:Address",
+                basketsDestination ?? backendDestination);
+            webHost.UseSetting(
+                "ReverseProxy:Clusters:orders:Destinations:primary:Address",
+                ordersDestination ?? backendDestination);
+            webHost.UseSetting(
+                "ReverseProxy:Clusters:payments:Destinations:primary:Address",
+                paymentsDestination ?? backendDestination);
             webHost.UseSetting(
                 "ReverseProxy:Clusters:frontend-admin:Destinations:primary:Address",
                 frontendDestination);

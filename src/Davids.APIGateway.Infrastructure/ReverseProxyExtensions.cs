@@ -35,6 +35,10 @@ public static class ReverseProxyExtensions
     private const string IdentityAddressKey = "ReverseProxy:Clusters:identity:Destinations:primary:Address";
     private const string AdminIdentityAddressKey = "ReverseProxy:Clusters:admin-identity:Destinations:primary:Address";
     private const string CustomersAddressKey = "ReverseProxy:Clusters:customers:Destinations:primary:Address";
+    private const string ProductsAddressKey = "ReverseProxy:Clusters:products:Destinations:primary:Address";
+    private const string BasketsAddressKey = "ReverseProxy:Clusters:baskets:Destinations:primary:Address";
+    private const string OrdersAddressKey = "ReverseProxy:Clusters:orders:Destinations:primary:Address";
+    private const string PaymentsAddressKey = "ReverseProxy:Clusters:payments:Destinations:primary:Address";
     private const string FrontendAdminAddressKey = "ReverseProxy:Clusters:frontend-admin:Destinations:primary:Address";
     private const string FrontendWebAddressKey = "ReverseProxy:Clusters:frontend-web:Destinations:primary:Address";
 
@@ -45,6 +49,26 @@ public static class ReverseProxyExtensions
         ValidateHttpAddress(configuration, IdentityAddressKey, "identity");
         ValidateHttpAddress(configuration, AdminIdentityAddressKey, "admin-identity");
         ValidateHttpAddress(configuration, CustomersAddressKey, "customers");
+        if (!string.IsNullOrWhiteSpace(configuration[ProductsAddressKey]))
+        {
+            ValidateHttpAddress(configuration, ProductsAddressKey, "products");
+        }
+
+        if (!string.IsNullOrWhiteSpace(configuration[BasketsAddressKey]))
+        {
+            ValidateHttpAddress(configuration, BasketsAddressKey, "baskets");
+        }
+
+        if (!string.IsNullOrWhiteSpace(configuration[OrdersAddressKey]))
+        {
+            ValidateHttpAddress(configuration, OrdersAddressKey, "orders");
+        }
+
+        if (!string.IsNullOrWhiteSpace(configuration[PaymentsAddressKey]))
+        {
+            ValidateHttpAddress(configuration, PaymentsAddressKey, "payments");
+        }
+
         ValidateHttpAddress(configuration, FrontendAdminAddressKey, "frontend-admin");
         if (!string.IsNullOrWhiteSpace(configuration[FrontendWebAddressKey]))
         {
@@ -186,6 +210,10 @@ public static class ReverseProxyExtensions
         var prefersCustomer =
             path.StartsWithSegments("/identity") ||
             path.StartsWithSegments("/customers/me") ||
+            path.StartsWithSegments("/baskets") ||
+            path.StartsWithSegments("/orders/me") ||
+            path.StartsWithSegments("/orders/checkout") ||
+            path.StartsWithSegments("/payments/me") ||
             (path.Equals("/customers", StringComparison.OrdinalIgnoreCase) && HttpMethods.IsPost(request.Method)) ||
             GatewaySecurityExtensions.IsCustomerHost(request.Host.Host);
 

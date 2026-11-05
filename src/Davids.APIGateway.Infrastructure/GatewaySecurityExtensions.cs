@@ -154,6 +154,10 @@ public sealed class GatewayAuthorizationResultHandler : IAuthorizationMiddleware
            path.StartsWithSegments("/customer-accounts") ||
            path.StartsWithSegments("/admin-identity") ||
            path.StartsWithSegments("/customers") ||
+           path.StartsWithSegments("/products") ||
+           path.StartsWithSegments("/baskets") ||
+           path.StartsWithSegments("/orders") ||
+           path.StartsWithSegments("/payments") ||
            path.StartsWithSegments("/auth") ||
            path.StartsWithSegments("/customer-auth");
 }
