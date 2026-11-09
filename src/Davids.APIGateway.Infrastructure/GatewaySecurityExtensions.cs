@@ -65,6 +65,29 @@ public sealed class GatewayAuthorizationResultHandler : IAuthorizationMiddleware
             return;
         }
 
+        // Select the login page from the matched frontend policy, not the host or
+        // path alone. A customer session must not block an administrator signing in
+        // (and vice versa); API and non-HTML requests retain 401/403 semantics.
+        var policies = context.GetEndpoint()?.Metadata.GetOrderedMetadata<IAuthorizeData>();
+        var isBrowser = (HttpMethods.IsGet(context.Request.Method) || HttpMethods.IsHead(context.Request.Method)) &&
+                        context.Request.Headers.Accept.ToString().Contains("text/html", StringComparison.OrdinalIgnoreCase);
+        if (isBrowser && policies is not null)
+        {
+            string? loginPath = null;
+            if (policies.Any(p => string.Equals(p.Policy, GatewayAuthPolicies.AdminFrontend, StringComparison.Ordinal)))
+                loginPath = "/admin/login";
+            else if (policies.Any(p => string.Equals(p.Policy, GatewayAuthPolicies.CustomerFrontend, StringComparison.Ordinal)))
+                loginPath = "/login";
+
+            if (loginPath is not null)
+            {
+                context.Response.StatusCode = StatusCodes.Status302Found;
+                context.Response.Headers.Location = loginPath;
+                context.Response.Headers.CacheControl = "no-store";
+                return;
+            }
+        }
+
         if (authorizeResult.Forbidden)
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
@@ -74,22 +97,6 @@ public sealed class GatewayAuthorizationResultHandler : IAuthorizationMiddleware
                 code = "forbidden",
                 reason = "Your account is not permitted to perform this action."
             }, context.RequestAborted);
-            return;
-        }
-
-        if (IsBrowserCustomerFrontendNavigation(context.Request, out var customerLoginPath))
-        {
-            context.Response.StatusCode = StatusCodes.Status302Found;
-            context.Response.Headers.Location = customerLoginPath;
-            context.Response.Headers.CacheControl = "no-store";
-            return;
-        }
-
-        if (IsBrowserAdminFrontendNavigation(context.Request))
-        {
-            context.Response.StatusCode = StatusCodes.Status302Found;
-            context.Response.Headers.Location = "/login";
-            context.Response.Headers.CacheControl = "no-store";
             return;
         }
 
@@ -103,63 +110,7 @@ public sealed class GatewayAuthorizationResultHandler : IAuthorizationMiddleware
         }, context.RequestAborted);
     }
 
-    private static bool IsBrowserCustomerFrontendNavigation(HttpRequest request, out string loginPath)
-    {
-        loginPath = "/portal/login";
-        if (!HttpMethods.IsGet(request.Method) && !HttpMethods.IsHead(request.Method))
-        {
-            return false;
-        }
 
-        var accept = request.Headers.Accept.ToString();
-        if (!accept.Contains("text/html", StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        if (request.Path.StartsWithSegments("/portal"))
-        {
-            loginPath = "/portal/login";
-            return true;
-        }
-
-        if (GatewaySecurityExtensions.IsCustomerHost(request.Host.Host) &&
-            !IsApiOrAuthPath(request.Path))
-        {
-            loginPath = "/login";
-            return true;
-        }
-
-        return false;
-    }
-
-    private static bool IsBrowserAdminFrontendNavigation(HttpRequest request)
-    {
-        if (!HttpMethods.IsGet(request.Method) && !HttpMethods.IsHead(request.Method))
-        {
-            return false;
-        }
-
-        if (IsApiOrAuthPath(request.Path) || request.Path.StartsWithSegments("/portal"))
-        {
-            return false;
-        }
-
-        var accept = request.Headers.Accept.ToString();
-        return accept.Contains("text/html", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static bool IsApiOrAuthPath(PathString path)
-        => path.StartsWithSegments("/identity") ||
-           path.StartsWithSegments("/customer-accounts") ||
-           path.StartsWithSegments("/admin-identity") ||
-           path.StartsWithSegments("/customers") ||
-           path.StartsWithSegments("/products") ||
-           path.StartsWithSegments("/baskets") ||
-           path.StartsWithSegments("/orders") ||
-           path.StartsWithSegments("/payments") ||
-           path.StartsWithSegments("/auth") ||
-           path.StartsWithSegments("/customer-auth");
 }
 
 public static class GatewaySecurityExtensions
@@ -521,9 +472,7 @@ public static class GatewaySecurityExtensions
                             "Audit: customer BFF OIDC callback failed from {ClientIp} (CorrelationId={CorrelationId}).",
                             ResolveNormalizedIp(context.HttpContext),
                             context.HttpContext.TraceIdentifier);
-                        var target = IsCustomerHost(context.Request.Host.Host)
-                            ? "/login?error=oidc_failed"
-                            : "/portal/login?error=oidc_failed";
+                        var target = "/login?error=oidc_failed";
                         context.Response.Redirect(target);
                         context.HandleResponse();
                         return Task.CompletedTask;
@@ -835,7 +784,7 @@ public static class GatewaySecurityExtensions
                             "Audit: administrator BFF OIDC callback failed from {ClientIp} (CorrelationId={CorrelationId}).",
                             ResolveNormalizedIp(context.HttpContext),
                             context.HttpContext.TraceIdentifier);
-                        context.Response.Redirect("/login?error=oidc_failed");
+                        context.Response.Redirect("/admin/login?error=oidc_failed");
                         context.HandleResponse();
                         return Task.CompletedTask;
                     }

@@ -81,19 +81,21 @@ app.MapGet("/gateway-info", () => Results.Ok(new
         "/admin-identity/{**remainder}",
         "/customers/{**remainder}",
         "/login",
+        "/admin/login",
+        "/admin/{**remainder}",
         "/{**remainder}"
     },
     authentication = "Self-Hosted .NET OIDC: CustomerBearer RS256 JWKS + AdminBearer RS256 JWKS + Confidential PKCE AdminBffCookie",
     authorization = new[]
     {
-        "Anonymous (explicit public OIDC protocol & /login routes)",
+        "Anonymous (explicit public OIDC protocol & portal login routes)",
         "customer-authenticated",
         "authenticated",
         "resource-owner-or-admin",
         "customers-admin",
         "admin-frontend"
     },
-    routing = "YARP validates RS256 OIDC JWTs via JWKS discovery and terminates the Authorization Code + PKCE BFF session for Davids.Frontend.Admin, stripping cookies and injecting verified Bearer tokens to downstream clusters."
+    routing = "YARP validates RS256 OIDC JWTs via JWKS discovery and terminates separate Authorization Code + PKCE BFF sessions for both portals, stripping cookies and injecting verified Bearer tokens to downstream clusters."
 })).AllowAnonymous();
 app.MapGatewayReverseProxy();
 app.Run();

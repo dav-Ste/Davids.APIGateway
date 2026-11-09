@@ -45,7 +45,7 @@ public sealed class CustomerBffAndPortalProxyTests
             });
 
             // 1. /customer-auth/login issues PKCE S256 redirect to /identity/connect/authorize with isolated cookies.
-            using var loginResp = await client.GetAsync("/customer-auth/login?returnUrl=%2Fportal");
+            using var loginResp = await client.GetAsync("/customer-auth/login?returnUrl=%2F");
             Assert.Equal(HttpStatusCode.Found, loginResp.StatusCode);
             var redirectLocation = loginResp.Headers.Location?.ToString() ?? string.Empty;
             Assert.Contains("/identity/connect/authorize", redirectLocation, StringComparison.Ordinal);
@@ -56,13 +56,13 @@ public sealed class CustomerBffAndPortalProxyTests
             Assert.Contains(GatewayAuthPolicies.CustomerOidcCorrelationCookiePrefix, setCookies, StringComparison.Ordinal);
             Assert.Contains(GatewayAuthPolicies.CustomerOidcNonceCookiePrefix, setCookies, StringComparison.Ordinal);
 
-            // 2. Anonymous HTML GET /portal -> 302 /portal/login; Host portal.davids.test GET / -> 302 /login.
-            using (var anonPortal = new HttpRequestMessage(HttpMethod.Get, "/portal"))
+            // 2. Anonymous HTML GET / -> 302 /login; Host portal.davids.test GET / -> 302 /login.
+            using (var anonPortal = new HttpRequestMessage(HttpMethod.Get, "/"))
             {
                 anonPortal.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/html"));
                 using var resp = await client.SendAsync(anonPortal);
                 Assert.Equal(HttpStatusCode.Found, resp.StatusCode);
-                Assert.Equal("/portal/login", resp.Headers.Location?.OriginalString);
+                Assert.Equal("/login", resp.Headers.Location?.OriginalString);
             }
 
             using (var anonHost = new HttpRequestMessage(HttpMethod.Get, "http://portal.davids.test/"))
@@ -73,17 +73,17 @@ public sealed class CustomerBffAndPortalProxyTests
                 Assert.Equal("/login", resp.Headers.Location?.OriginalString);
             }
 
-            // 3. Public login shell on /portal/login reaches frontend-web as /login.
-            using (var pubLogin = await client.GetAsync("/portal/login"))
+            // 3. Public login shell on /login reaches frontend-web as /login.
+            using (var pubLogin = await client.GetAsync("/login"))
             {
                 Assert.Equal(HttpStatusCode.OK, pubLogin.StatusCode);
                 using var doc = await JsonDocument.ParseAsync(await pubLogin.Content.ReadAsStreamAsync());
                 Assert.Equal("/login", doc.RootElement.GetProperty("path").GetString());
             }
 
-            // 4. Workforce admin token is rejected (403) on /portal/app.js; customer token succeeds (200) with stripped credentials.
+            // 4. Workforce admin token is rejected (403) on /app.js; customer token succeeds (200) with stripped credentials.
             var adminToken = GatewayTestSecurity.CreateAdminToken(Guid.NewGuid(), "admin");
-            using (var adminPortalReq = new HttpRequestMessage(HttpMethod.Get, "/portal/app.js"))
+            using (var adminPortalReq = new HttpRequestMessage(HttpMethod.Get, "/app.js"))
             {
                 adminPortalReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", adminToken);
                 Assert.Equal(HttpStatusCode.Forbidden, (await client.SendAsync(adminPortalReq)).StatusCode);
@@ -91,7 +91,7 @@ public sealed class CustomerBffAndPortalProxyTests
 
             var customerId = Guid.NewGuid();
             var customerToken = GatewayTestSecurity.CreateCustomerToken(customerId, "user");
-            using (var custPortalReq = new HttpRequestMessage(HttpMethod.Get, "/portal/app.js"))
+            using (var custPortalReq = new HttpRequestMessage(HttpMethod.Get, "/app.js"))
             {
                 custPortalReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", customerToken);
                 custPortalReq.Headers.Add("Cookie", $"{GatewayAuthPolicies.CustomerBffCookieName}=secret");

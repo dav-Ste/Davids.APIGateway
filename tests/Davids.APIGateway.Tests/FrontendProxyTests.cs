@@ -41,44 +41,45 @@ public sealed class FrontendProxyTests
                 AllowAutoRedirect = false
             });
 
-            // Browser HTML GET to / without admin session redirects to /login without hitting downstream.
-            using var anonHtml = new HttpRequestMessage(HttpMethod.Get, "/");
+            // Browser HTML GET to /admin without workforce session redirects to /admin/login.
+            using var anonHtml = new HttpRequestMessage(HttpMethod.Get, "/admin");
             anonHtml.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/html"));
             using var redirectResponse = await client.SendAsync(anonHtml);
             Assert.Equal(HttpStatusCode.Found, redirectResponse.StatusCode);
-            Assert.Equal("/login", redirectResponse.Headers.Location?.OriginalString);
+            Assert.Equal("/admin/login", redirectResponse.Headers.Location?.OriginalString);
             Assert.Contains("no-store", redirectResponse.Headers.CacheControl?.ToString() ?? string.Empty);
 
             // Non-HTML request to admin JS/CSS asset without admin session returns 401.
-            using var anonAsset = await client.GetAsync("/app.js");
+            using var anonAsset = await client.GetAsync("/admin/app.js");
             Assert.Equal(HttpStatusCode.Unauthorized, anonAsset.StatusCode);
 
             // Authenticated customer ('user' from Davids.Services.Identity) receives 403 Forbidden on / and /app.js.
             var customerToken = GatewayTestSecurity.CreateCustomerToken(Guid.NewGuid(), "user");
-            using var customerHtml = new HttpRequestMessage(HttpMethod.Get, "/");
+            using var customerHtml = new HttpRequestMessage(HttpMethod.Get, "/admin");
             customerHtml.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/html"));
             customerHtml.Headers.Authorization = new AuthenticationHeaderValue("Bearer", customerToken);
             using var customerForbidden = await client.SendAsync(customerHtml);
-            Assert.Equal(HttpStatusCode.Forbidden, customerForbidden.StatusCode);
+            Assert.Equal(HttpStatusCode.Found, customerForbidden.StatusCode);
+            Assert.Equal("/admin/login", customerForbidden.Headers.Location?.OriginalString);
 
-            using var customerAsset = new HttpRequestMessage(HttpMethod.Get, "/app.js");
+            using var customerAsset = new HttpRequestMessage(HttpMethod.Get, "/admin/app.js");
             customerAsset.Headers.Authorization = new AuthenticationHeaderValue("Bearer", customerToken);
             Assert.Equal(HttpStatusCode.Forbidden, (await client.SendAsync(customerAsset)).StatusCode);
 
             // Forged customer-key token claiming 'admin' is rejected with 401 Unauthorized.
             var forgedAdmin = GatewayTestSecurity.CreateCustomerToken(Guid.NewGuid(), "admin");
-            using var forgedReq = new HttpRequestMessage(HttpMethod.Get, "/app.js");
+            using var forgedReq = new HttpRequestMessage(HttpMethod.Get, "/admin/app.js");
             forgedReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", forgedAdmin);
             Assert.Equal(HttpStatusCode.Unauthorized, (await client.SendAsync(forgedReq)).StatusCode);
 
             Assert.Equal(0, frontendHits);
 
             // Minimal public /login surface is reachable anonymously so administrators can initiate OIDC SSO.
-            foreach (var publicLoginAsset in new[] { "/login", "/login.css", "/login.js", "/favicon.svg" })
+            foreach (var publicLoginAsset in new[] { "/admin/login", "/admin/login.css", "/admin/login.js", "/admin/favicon.svg" })
             {
                 using var loginRes = await client.GetAsync(publicLoginAsset);
                 Assert.Equal(HttpStatusCode.OK, loginRes.StatusCode);
-                Assert.Equal($"served:{publicLoginAsset}", await loginRes.Content.ReadAsStringAsync());
+                Assert.Equal($"served:{publicLoginAsset[6..]}", await loginRes.Content.ReadAsStringAsync());
             }
 
             Assert.Equal(4, frontendHits);
@@ -124,7 +125,7 @@ public sealed class FrontendProxyTests
             client.DefaultRequestHeaders.Add("tracestate", "vendor=value");
             client.DefaultRequestHeaders.Add("baggage", "tenant=demo,user=admin");
 
-            using var response = await client.GetAsync("/");
+            using var response = await client.GetAsync("/admin");
             response.EnsureSuccessStatusCode();
             Assert.Equal("admin-web:request-123", response.Headers.GetValues("X-Correlation-ID").Single());
             Assert.Equal("4bf92f3577b34da6a3ce929d0e0e4736", response.Headers.GetValues("X-Trace-Id").Single());
@@ -178,7 +179,7 @@ public sealed class FrontendProxyTests
             using var client = factory.CreateClient();
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", adminToken);
             client.DefaultRequestHeaders.Add("X-Correlation-ID", "invalid id with spaces");
-            using var response = await client.GetAsync("/assets/app.js");
+            using var response = await client.GetAsync("/admin/assets/app.js");
             response.EnsureSuccessStatusCode();
 
             var returnedId = response.Headers.GetValues("X-Correlation-ID").Single();
@@ -186,7 +187,7 @@ public sealed class FrontendProxyTests
             Assert.Equal(returnedId, await response.Content.ReadAsStringAsync());
 
             client.DefaultRequestHeaders.Remove("X-Correlation-ID");
-            using var missingHeaderResponse = await client.GetAsync("/assets/app.css");
+            using var missingHeaderResponse = await client.GetAsync("/admin/assets/app.css");
             missingHeaderResponse.EnsureSuccessStatusCode();
             var generatedId = missingHeaderResponse.Headers.GetValues("X-Correlation-ID").Single();
             Assert.Matches("^[A-Fa-f0-9]{32}$", generatedId);

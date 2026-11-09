@@ -12,21 +12,21 @@ It enforces dual-authority **RS256** OIDC JWT validation via public JWKS discove
 
 - `src/Davids.APIGateway.Api`: YARP host, Vault KV-v2 startup loader (`secret/data/davids/gateway`), OIDC BFF endpoints (`/auth/login`, `/auth/session`, `/auth/logout`), gateway request-context middleware, CSP/security headers, and `/health`, `/alive`, & `/gateway-info`.
 - `src/Davids.APIGateway.Infrastructure`: Dual-authority `RS256` JWKS bearer authentication (`CustomerBearer` + `AdminBearer`), `AddOpenIdConnect` PKCE BFF (`AdminOidc` + `AdminBffCookie` with automatic server-side refresh rotation and Redis/RFC 7009 revocation), `GatewayAuthorizationResultHandler`, `ResourceOwnerOrAdminHandler`, YARP transforms, and destination validation.
-- `tests/Davids.APIGateway.Tests`: 34 unit, architecture, and end-to-end integration tests covering OIDC PKCE BFF login/callback/refresh/logout, CSRF protection, `RS256` JWKS validation, admin frontend gating (`302 /login` vs `401` vs `403`), route isolation, anti-spoofing transforms, Redis revocation, security metrics, and W3C tracing.
+- `tests/Davids.APIGateway.Tests`: unit, architecture, and integration tests covering OIDC PKCE BFF login/callback/refresh/logout, CSRF protection, `RS256` JWKS validation, admin frontend gating (`302 /admin/login` vs `401` vs `403`), route isolation, anti-spoofing transforms, Redis revocation, security metrics, and W3C tracing.
 
 ## Self-Hosted OIDC authentication & Admin BFF architecture
 
 Customer accounts (`identitydb`) and administrator accounts (`adminidentitydb`) are isolated across separate SQL databases, separate OpenIddict OIDC authorities, separate Vault KV paths, and distinct 2048-bit+ RSA signing keys:
 
 - **`CustomerBearer`** (`CustomerOidc`): Validates `RS256` tokens via `Davids.Services.Identity`'s `/.well-known/openid-configuration` & `/.well-known/jwks` (`Audience: davids-services`), restricted strictly to `role == "user"`.
-- **`AdminBearer`** (`AdminOidc`): Validates `RS256` tokens via `Davids.Services.AdminIdentity`'s `/.well-known/openid-configuration` & `/.well-known/jwks` (`Audience: davids-admin`), restricted strictly to `role == "admin"`.
+- **`AdminBearer`** (`AdminOidc`): Validates `RS256` tokens via `Davids.Services.AdminIdentity`'s `/.well-known/openid-configuration` & `/.well-known/jwks` (`Audience: davids-admin`), restricted to workforce roles `admin`, `support`, and `auditor`.
 - **`AdminBffCookie` (`davids_admin_bff`)**: Encrypted ASP.NET Core `HttpOnly; SameSite=Lax` BFF session cookie backed by confidential OIDC client `davids-admin-bff` (`secret/data/davids/gateway` -> `AdminOidc:BffClientSecret`) using `Authorization Code + PKCE (S256)`. Raw access and refresh tokens remain encrypted server-side, are refreshed transparently via `/connect/token` prior to expiry, and are injected as `Authorization: Bearer <access_token>` only on internal YARP hops to `admin-identity` and `customers`.
 
-Only verified administrators (`AdminBearer` or `AdminBffCookie`) can access `Davids.Frontend.Admin` (`/` and workspace assets):
+Only verified workforce users (`admin`, `support`, or `auditor`, via `AdminBearer` or `AdminBffCookie`) can access `Davids.Frontend.Admin` (`/admin` and workspace assets):
 
-- Unauthenticated browser HTML navigations (`Accept: text/html`) to `/` redirect (`302 Found`, `Cache-Control: no-store`) to `/login`.
+- Unauthenticated browser HTML navigations (`Accept: text/html`) to `/admin` redirect (`302 Found`, `Cache-Control: no-store`) to `/admin/login`. Customer portal navigations to `/` redirect to `/login`.
 - Unauthenticated asset/API requests return `401 Unauthorized`.
-- Authenticated customer users (`CustomerBearer`) receive `403 Forbidden` on `Davids.Frontend.Admin` and all admin endpoints.
+- Customer-only sessions are redirected to the workforce sign-in page for HTML navigation; customer requests for protected admin assets or APIs receive `403 Forbidden`.
 
 ## Gateway route & policy matrix
 
@@ -36,8 +36,10 @@ Only verified administrators (`AdminBearer` or `AdminBffCookie`) can access `Dav
 | `/auth/login`, `/signin-oidc` | `GET` | `AllowAnonymous` | OIDC Authorization Code + PKCE challenge & callback |
 | `/auth/session` | `GET` | `AllowAnonymous` | Non-sensitive BFF session status (`authenticated`, `sub`, `email`, `role`, `expiresAt`) |
 | `/auth/logout` | `POST` | `AllowAnonymous` (CSRF-verified) | Clears `davids_admin_bff` cookie and revokes access + refresh tokens via RFC 7009 |
-| `/login`, `/login.css`, `/login.js`, `/favicon.svg` | `GET`, `HEAD` | `Anonymous` | Minimal public administrator SSO entry page |
-| `/{**remainder}` (`admin-web-frontend`) | `GET`, `HEAD` | `admin-frontend` | Protected `Davids.Frontend.Admin` workspace (admin only) |
+| `/login`, `/login.css`, `/login.js`, `/favicon.svg` | `GET`, `HEAD` | `Anonymous` | Customer SSO entry page |
+| `/admin/login`, `/admin/login.css`, `/admin/login.js`, `/admin/favicon.svg` | `GET`, `HEAD` | `Anonymous` | Workforce SSO entry page |
+| `/admin`, `/admin/{**remainder}` | `GET`, `HEAD` | `admin-frontend` | Protected workforce portal; gateway removes `/admin` upstream |
+| `/{**remainder}` | `GET`, `HEAD` | `customer-frontend` | Protected customer portal; API routes take precedence |
 | `/admin-identity/.well-known/{**remainder}` | `GET`, `HEAD` | `Anonymous` | Admin OIDC discovery and public RSA JWKS |
 | `/admin-identity/connect/authorize`, `authorize.css`, `token`, `revocation`, `logout` | `GET`, `POST` | `Anonymous` | Admin OIDC protocol endpoints (`PathRemovePrefix: /admin-identity`) |
 | `/admin-identity/connect/userinfo` | `GET`, `POST` | `customers-admin` | Authenticated Admin OIDC UserInfo |
@@ -78,4 +80,6 @@ docker build -f Davids.APIGateway/Dockerfile -t davids-api-gateway:local ..
 - [`Davids.Services.AdminIdentity`](https://github.com/dav-Ste/Davids.Services.AdminIdentity) — Administrator OpenIddict `RS256` OIDC Provider (`adminidentitydb`)
 - [`Davids.Services.Customers`](https://github.com/dav-Ste/Davids.Services.Customers) — Customer profiles & order tracking API (`customersdb`)
 - [`Davids.Frontend.Admin`](https://github.com/dav-Ste/Davids.Frontend.Admin) — Passwordless Workforce RBAC customer, IAM & audit web UI (`AdminBffCookie` / `davids_admin_bff`)
-- [`Davids.Frontend.Web`](https://github.com/dav-Ste/Davids.Frontend.Web) — Customer Self-Service Web Portal (`CustomerBffCookie` / `davids_customer_bff`, `/portal`, `/customer-auth/{login,session,logout}`)
+- [`Davids.Frontend.Web`](https://github.com/dav-Ste/Davids.Frontend.Web) — Customer Self-Service Web Portal (`CustomerBffCookie` / `davids_customer_bff`, `/`, `/customer-auth/{login,session,logout}`)
+
+The portal paths are on the **gateway origin**: customer `http://localhost:17320/` and workforce `http://localhost:17320/admin` (use HTTPS where configured). Direct frontend ports serve assets but do not provide gateway authentication or API routing.

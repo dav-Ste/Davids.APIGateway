@@ -273,51 +273,34 @@ public static class GatewayBffEndpoints
         return endpoints;
     }
 
+    // Keep administrative login returns within the administrative portal.
     public static string NormalizeLocalReturnUrl(string? returnUrl)
     {
-        if (string.IsNullOrWhiteSpace(returnUrl))
-        {
-            return "/";
-        }
-
+        if (string.IsNullOrWhiteSpace(returnUrl)) return "/admin";
         var trimmed = returnUrl.Trim();
-        if (!trimmed.StartsWith('/') || trimmed.StartsWith("//", StringComparison.Ordinal) || trimmed.StartsWith("/\\", StringComparison.Ordinal))
-        {
-            return "/";
-        }
-
-        if (trimmed.StartsWith("/login", StringComparison.OrdinalIgnoreCase) ||
-            trimmed.StartsWith("/auth/", StringComparison.OrdinalIgnoreCase) ||
-            trimmed.StartsWith("/customer-auth/", StringComparison.OrdinalIgnoreCase))
-        {
-            return "/";
-        }
-
+        if (trimmed.Contains('\\') || trimmed.Any(char.IsControl) ||
+            !Uri.TryCreate(trimmed, UriKind.Relative, out _) ||
+            !(trimmed.Equals("/admin", StringComparison.OrdinalIgnoreCase) ||
+              trimmed.StartsWith("/admin/", StringComparison.OrdinalIgnoreCase) ||
+              trimmed.StartsWith("/admin?", StringComparison.OrdinalIgnoreCase)) ||
+            trimmed.StartsWith("/admin/login", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.Contains('%')) return "/admin";
         return trimmed;
     }
 
     public static string NormalizeCustomerReturnUrl(string? returnUrl, HttpRequest request)
     {
-        var defaultTarget = GatewaySecurityExtensions.IsCustomerHost(request.Host.Host) ? "/" : "/portal";
-        if (string.IsNullOrWhiteSpace(returnUrl))
-        {
-            return defaultTarget;
-        }
-
+        _ = request;
+        if (string.IsNullOrWhiteSpace(returnUrl)) return "/";
         var trimmed = returnUrl.Trim();
-        if (!trimmed.StartsWith('/') || trimmed.StartsWith("//", StringComparison.Ordinal) || trimmed.StartsWith("/\\", StringComparison.Ordinal))
-        {
-            return defaultTarget;
-        }
-
-        if (trimmed.StartsWith("/login", StringComparison.OrdinalIgnoreCase) ||
-            trimmed.StartsWith("/portal/login", StringComparison.OrdinalIgnoreCase) ||
+        if (!trimmed.StartsWith('/') || trimmed.StartsWith("//", StringComparison.Ordinal) ||
+            trimmed.Contains('\\') || trimmed.Any(char.IsControl) || trimmed.Contains('%') ||
+            trimmed.StartsWith("/login", StringComparison.OrdinalIgnoreCase) ||
             trimmed.StartsWith("/auth/", StringComparison.OrdinalIgnoreCase) ||
-            trimmed.StartsWith("/customer-auth/", StringComparison.OrdinalIgnoreCase))
-        {
-            return defaultTarget;
-        }
-
+            trimmed.StartsWith("/customer-auth/", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.Equals("/admin", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.StartsWith("/admin/", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.StartsWith("/admin?", StringComparison.OrdinalIgnoreCase)) return "/";
         return trimmed;
     }
 

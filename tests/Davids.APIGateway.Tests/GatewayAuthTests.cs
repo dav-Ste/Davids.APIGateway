@@ -556,7 +556,7 @@ public sealed class GatewayAuthTests
             });
 
             // 1. Initiate OIDC BFF login -> redirects to /admin-identity/connect/authorize with PKCE S256 + correlation/nonce cookies.
-            using var loginChallenge = await client.GetAsync("/auth/login?returnUrl=%2F");
+            using var loginChallenge = await client.GetAsync("/auth/login?returnUrl=%2Fadmin");
             Assert.Equal(HttpStatusCode.Redirect, loginChallenge.StatusCode);
             var redirectLocation = loginChallenge.Headers.Location!;
             Assert.Equal("/admin-identity/connect/authorize", redirectLocation.AbsolutePath);
@@ -609,7 +609,7 @@ public sealed class GatewayAuthTests
             callbackReq.Headers.Add("Cookie", string.Join("; ", oidcChallengeCookies));
             using var callbackRes = await client.SendAsync(callbackReq);
             Assert.Equal(HttpStatusCode.Redirect, callbackRes.StatusCode);
-            Assert.Equal("/", callbackRes.Headers.Location?.OriginalString);
+            Assert.Equal("/admin", callbackRes.Headers.Location?.OriginalString);
 
             var bffSetCookie = callbackRes.Headers.GetValues("Set-Cookie")
                 .Single(c => c.StartsWith($"{GatewayAuthPolicies.AdminBffCookieName}=", StringComparison.Ordinal));
@@ -715,7 +715,7 @@ public sealed class GatewayAuthTests
                 Assert.Equal(HttpStatusCode.Unauthorized, (await client.SendAsync(revokedRequest)).StatusCode);
             }
 
-            foreach (var path in new[] { "/app.js", "/admin-identity/me", "/customers" })
+            foreach (var path in new[] { "/admin/app.js", "/admin-identity/me", "/customers" })
             {
                 using var revokedAdminReq = new HttpRequestMessage(HttpMethod.Get, path);
                 revokedAdminReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", revokedAdminToken);
@@ -731,7 +731,7 @@ public sealed class GatewayAuthTests
                 Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(activeRequest)).StatusCode);
             }
 
-            foreach (var path in new[] { "/app.js", "/admin-identity/me", "/customers" })
+            foreach (var path in new[] { "/admin/app.js", "/admin-identity/me", "/customers" })
             {
                 using var activeAdminReq = new HttpRequestMessage(HttpMethod.Get, path);
                 activeAdminReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", activeAdminToken);
