@@ -1,4 +1,4 @@
-name: Pull Request CI — Security Gate
+name: CI — Build, Tests & Security
 
 on:
   push:
