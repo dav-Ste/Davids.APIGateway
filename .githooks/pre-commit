@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 # Davids pre-commit secret & credential gate (POSIX sh — works on Windows Git Bash, Linux, and macOS).
-# Activate across all sibling repositories via: pwsh ./scripts/Install-GitHooks.ps1 (from Davids/)
+# Activate across all sibling repositories via: pwsh ./scripts/security/local-dev-commit/Install-GitHooks.ps1 (from Davids/)
 set -eu
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
@@ -33,7 +33,7 @@ fi
 if [ -z "$GITLEAKS_BIN" ]; then
   echo "[Davids Security Gate] Commit blocked: 'gitleaks' is required by the pre-commit secret scanner." >&2
   echo "Install Gitleaks once by running from the Davids repository:" >&2
-  echo "  ./scripts/Install-GitHooks.ps1 -InstallGitleaks" >&2
+  echo "  ./scripts/security/local-dev-commit/Install-GitHooks.ps1 -InstallGitleaks" >&2
   echo "Or via package manager: winget install Gitleaks.Gitleaks | brew install gitleaks" >&2
   exit 1
 fi
